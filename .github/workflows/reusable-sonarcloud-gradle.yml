@@ -1,0 +1,52 @@
+name: Reusable SonarCloud Analysis (Gradle)
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '25'
+      sonar-org:
+        description: 'SonarCloud organization'
+        required: true
+        type: string
+      sonar-project-key:
+        description: 'SonarCloud project key'
+        required: true
+        type: string
+    secrets:
+      SONAR_TOKEN:
+        description: 'SonarCloud authentication token'
+        required: true
+
+jobs:
+  sonar-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: 'gradle'
+
+      - name: Generate JaCoCo Report
+        run: ./gradlew build jacocoTestReport
+
+      - name: SonarCloud Analysis
+        run: >
+          ./gradlew sonar
+          -Dsonar.organization=${{ inputs.sonar-org }}
+          -Dsonar.projectKey=${{ inputs.sonar-project-key }}
+          -Dsonar.host.url=https://sonarcloud.io
+          -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
