@@ -41,7 +41,7 @@ jobs:
           fetch-depth: 0
 
       - name: Nova Setup Node
-        uses: ahincho/nova-devops/.github/actions/nova-setup-node@v1
+        uses: ahincho/nova-devops/.github/actions/nova-setup-node@main
         with:
           node-version: ${{ inputs.node-version }}
 

@@ -36,7 +36,7 @@ jobs:
           ref: main
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@v1
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: gradle
