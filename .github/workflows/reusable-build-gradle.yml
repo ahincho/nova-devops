@@ -20,6 +20,11 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Setup Gradle with GitHub Actions Cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.event_name != 'push' }}
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
