@@ -1,0 +1,15 @@
+name: Publish on Tag
+
+description: |
+  Triggered when release-please pushes a tag vX.Y.Z after merging the release PR.
+  Publishes the artifact to GitHub Packages.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  publish:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@main
+    secrets: inherit

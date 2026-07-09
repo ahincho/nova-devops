@@ -31,6 +31,7 @@ Estos workflows proporcionan un pipeline de CI/CD estandarizado con variantes de
 | [Conventional Commits Lint](#9-reusable-commitlintyml) | `reusable-commitlint.yml` | Enforce Conventional Commits en un rango de commits |
 | [Release Please](#10-reusable-release-pleaseyml) | `reusable-release-please.yml` | Orquestador de release automático basado en `release-please` |
 | [Generador de CHANGELOG](#11-reusable-changelogyml) | `reusable-changelog.yml` | Auto-generación de CHANGELOG.md con `conventional-changelog-cli` |
+| [Release Publish (Sprint 3)](#18-reusable-release-publishyml) | `reusable-release-publish.yml` | Publish al dispararse un tag `vX.Y.Z` creado por release-please |
 
 ### Workflows de Publicacion Multi-Registry
 
@@ -595,11 +596,71 @@ Igual que #16.
 
 ---
 
+## 18. reusable-release-publish.yml (Sprint 3 — NOVA-SEMVER-13)
+
+Workflow reutilizable que se ejecuta al hacer push de un tag `vX.Y.Z` (formato semver estricto). Suplanta el antiguo par `version-bump` + `publish` con una cadena determinista de un solo paso.
+
+### Disparador
+
+- `on: workflow_call` (llamado desde `publish-on-tag.yml`).
+- El workflow llamador debe configurarse con `on: push: tags: ['v[0-9]+.[0-9]+.[0-9]+']`.
+
+### Pasos del Pipeline
+
+1. **Validate tag format**: verifica que el tag cumpla `^v[0-9]+\.[0-9]+\.[0-9]+$`.
+2. **Sync version from tag to gradle.properties**: escribe `version=<version-sin-v>` en `gradle.properties`.
+3. **Nova Setup Java**: composite action con Java 25 + caché Gradle.
+4. **Resolve package visibility**: prioridad `input > vars.NOVA_PACKAGE_VISIBILITY > "public"`.
+5. **Validate visibility compatibility**: rechaza combinaciones inválidas (public repo + private package).
+6. **Publish to GitHub Packages**: `./gradlew publish -Pvisibility=...`.
+
+### Reemplazo del patrón antiguo
+
+Antes (NO recomendado):
+```yaml
+publish:
+  if: github.event_name == 'push'
+  needs: version-bump
+  uses: ahincho/nova-devops/.github/workflows/reusable-publish-gradle.yml@main
+```
+
+Ahora:
+```yaml
+# publish-on-tag.yml
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+jobs:
+  publish:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@main
+    secrets: inherit
+```
+
+### Notas
+
+- Este workflow **deprecó** `reusable-version-bump-{gradle,maven}.yml` y `reusable-publish-{gradle,maven}.yml` para el flujo de release. Estos quedan como legacy para migraciones graduales pero no se usan en los repos migrados a Sprint 3.
+
+---
+
 ## Ejemplo Completo de Workflow Llamador (ci.yml)
 
 A continuación se muestra un ejemplo completo de un workflow llamador que orquesta todos los workflows reutilizables. Este archivo se coloca en cada repositorio de librería en `.github/workflows/ci.yml`.
 
-### Ejemplo para Maven (mask-utils)
+> **Flujo de release oficial (a partir de Sprint 3 — NOVA-SEMVER-13):** el versionado se delega a `release-please`, que crea un PR con el bump propuesto y, al hacer merge, genera un tag `vX.Y.Z`. El tag dispara el publish. **El push directo a `main` ya no bumpea versión.**
+
+### Estructura de archivos en cada repo
+
+```
+.github/
+  workflows/
+    ci.yml                 # PR + build + sonar
+    release-please.yml     # push a main → PR de release
+    publish-on-tag.yml     # tag vX.Y.Z → publish
+.release-please-config.json
+.release-please-manifest.json
+```
+
+### `ci.yml` (común a todos los repos)
 
 ```yaml
 name: CI/CD Pipeline
@@ -614,64 +675,85 @@ on:
 jobs:
   build:
     if: github.event_name == 'pull_request'
-    uses: <org>/nova-devops/.github/workflows/reusable-build-maven.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-build-gradle.yml@main
+    secrets: inherit
 
   sonar:
     if: github.event_name == 'pull_request'
-    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-maven.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
     with:
-      sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_nova-mask-utils
-    secrets: inherit
-
-  version-bump:
-    if: github.event_name == 'push'
-    uses: <org>/nova-devops/.github/workflows/reusable-version-bump-maven.yml@main
-    secrets: inherit
-
-  publish:
-    if: github.event_name == 'push'
-    needs: version-bump
-    uses: <org>/nova-devops/.github/workflows/reusable-publish-maven.yml@main
+      sonar-org: ahincho
+      sonar-project-key: ahincho_nova-java-spring-boot-<nombre-corto>
     secrets: inherit
 ```
 
-### Ejemplo para Gradle (date-utils)
+### `release-please.yml`
 
 ```yaml
-name: CI/CD Pipeline
+name: Release Please
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
   push:
     branches: [main]
 
 jobs:
-  build:
-    if: github.event_name == 'pull_request'
-    uses: <org>/nova-devops/.github/workflows/reusable-build-gradle.yml@main
+  release-please:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@main
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
 
-  sonar:
-    if: github.event_name == 'pull_request'
-    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
-    with:
-      sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_nova-date-utils
-    secrets: inherit
+### `publish-on-tag.yml`
 
-  version-bump:
-    if: github.event_name == 'push'
-    uses: <org>/nova-devops/.github/workflows/reusable-version-bump-gradle.yml@main
-    secrets: inherit
+```yaml
+name: Publish on Tag
 
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+jobs:
   publish:
-    if: github.event_name == 'push'
-    needs: version-bump
-    uses: <org>/nova-devops/.github/workflows/reusable-publish-gradle.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@main
     secrets: inherit
 ```
+
+### `.release-please-config.json`
+
+```json
+{
+  "packages": {
+    ".": {
+      "package-name": "nova-java-spring-boot-<nombre-corto>",
+      "release-type": "java",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "draft": false,
+      "prerelease": false
+    }
+  }
+}
+```
+
+### `.release-please-manifest.json`
+
+```json
+{
+  ".": "0.1.0"
+}
+```
+
+> El manifest se actualiza automáticamente en cada release PR. Inicialmente contiene la versión de partida (`0.1.0`).
+
+### Migración desde el patrón antiguo (version-bump + publish)
+
+Si tu `ci.yml` actual tiene la estructura `version-bump` + `publish` con `needs:`, debes:
+
+1. Eliminar `version-bump` y `publish` de `ci.yml`.
+2. Crear `release-please.yml` y `publish-on-tag.yml`.
+3. Crear `.release-please-config.json` y `.release-please-manifest.json`.
+4. Hacer commit + push.
+5. A partir de ahí, cada push a `main` dispara `release-please`. Cuando cree un PR, mergearlo → tag + release + publish automático.
 
 ---
 

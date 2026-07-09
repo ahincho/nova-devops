@@ -1,0 +1,17 @@
+name: Release Please
+
+description: |
+  Runs release-please to create a release PR based on Conventional Commits.
+  On PR merge, release-please creates a GitHub Release and a tag vX.Y.Z.
+  The tag push triggers the publish workflow.
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-please:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@main
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
