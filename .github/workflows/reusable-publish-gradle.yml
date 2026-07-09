@@ -35,6 +35,9 @@ jobs:
         with:
           ref: main
 
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
       - name: Nova Setup Java
         uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
         with:
