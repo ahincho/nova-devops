@@ -1,0 +1,38 @@
+name: 'Setup Nova Java Environment'
+description: 'Setup Java with Gradle/Maven cache following Nova conventions'
+inputs:
+  java-version:
+    description: 'Java version to use'
+    required: false
+    default: '25'
+  build-tool:
+    description: 'Build tool (maven | gradle)'
+    required: false
+    default: 'gradle'
+  distribution:
+    description: 'JDK distribution'
+    required: false
+    default: 'temurin'
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Java ${{ inputs.java-version }}
+      uses: actions/setup-java@v4
+      with:
+        distribution: ${{ inputs.distribution }}
+        java-version: ${{ inputs.java-version }}
+        cache: ${{ inputs.build-tool }}
+
+    - name: Validate build file exists
+      shell: bash
+      run: |
+        if [ ! -f "gradle.properties" ] && [ ! -f "pom.xml" ]; then
+          echo "::error::No build file found. Nova requires gradle.properties or pom.xml"
+          exit 1
+        fi
+
+    - name: Setup Gradle (if gradle)
+      if: inputs.build-tool == 'gradle'
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        cache-read-only: ${{ github.event_name != 'push' }}

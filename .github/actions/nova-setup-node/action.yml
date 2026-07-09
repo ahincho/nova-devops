@@ -1,0 +1,47 @@
+name: 'Setup Nova Node Environment'
+description: 'Setup Node.js with npm cache and install dependencies (commitlint, etc.) following Nova conventions'
+inputs:
+  node-version:
+    description: 'Node.js version'
+    required: false
+    default: '20'
+  package-manager:
+    description: 'Package manager (npm | pnpm | yarn)'
+    required: false
+    default: 'npm'
+  cache-key-prefix:
+    description: 'Prefix for node_modules cache key (use when monorepo needs different caches per package)'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js ${{ inputs.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Cache node modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          node_modules
+          .npm
+        key: ${{ runner.os }}-${{ inputs.package-manager }}-${{ inputs.cache-key-prefix }}-${{ hashFiles('**/package-lock.json', '**/package.json') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.package-manager }}-${{ inputs.cache-key-prefix }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        if [ -f "package.json" ]; then
+          if [ -f "package-lock.json" ]; then
+            echo "Running npm ci..."
+            npm ci --no-audit --no-fund
+          else
+            echo "Running npm install..."
+            npm install --no-audit --no-fund
+          fi
+        else
+          echo "::notice::No package.json found. Skipping dependency install."
+        fi

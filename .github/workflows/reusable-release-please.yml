@@ -1,0 +1,78 @@
+name: Reusable Release Please
+description: Run release-please for automated Conventional Commits based versioning
+on:
+  workflow_call:
+    inputs:
+      release-type:
+        description: 'Package release type (java | gradle | maven | python | node | go | rust | php | ruby | elixir)'
+        required: false
+        type: string
+        default: 'java'
+      package-name:
+        description: 'Package name (defaults to repository name if empty)'
+        required: false
+        type: string
+        default: ''
+      config-file:
+        description: 'Path to release-please config file'
+        required: false
+        type: string
+        default: '.release-please-config.json'
+      manifest-file:
+        description: 'Path to release-please manifest file (for multi-package/multi-repo coordination)'
+        required: false
+        type: string
+        default: ''
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20'
+      target-branch:
+        description: 'Target branch for release PRs'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      GH_TOKEN:
+        required: true
+        description: 'Token with contents:write and pull-requests:write permissions'
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Resolve package name
+        id: resolve-name
+        shell: bash
+        run: |
+          PKG_NAME="${{ inputs.package-name }}"
+          if [ -z "${PKG_NAME}" ]; then
+            PKG_NAME="${{ github.event.repository.name }}"
+          fi
+          echo "package-name=${PKG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Using package name: ${PKG_NAME}"
+
+      - name: Run release-please
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          release-type: ${{ inputs.release-type }}
+          package-name: ${{ steps.resolve-name.outputs.package-name }}
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}
+          target-branch: ${{ inputs.target-branch }}
+          # Fork PRs need PR approval; this is the default
+          # but we make it explicit for clarity
+          fork: false

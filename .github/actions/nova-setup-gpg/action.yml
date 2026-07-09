@@ -1,0 +1,80 @@
+name: 'Setup Nova GPG Signing'
+description: 'Import GPG key from inputs for Maven Central publishing (preparado, firma aun no generada)'
+inputs:
+  gpg-signing-key-id:
+    description: 'GPG key ID (fingerprint)'
+    required: false
+    default: ''
+  gpg-signing-key:
+    description: 'GPG private key (ASCII-armored, passed from workflow secrets as input)'
+    required: false
+    default: ''
+  gpg-signing-password:
+    description: 'GPG passphrase (if used)'
+    required: false
+    default: ''
+  fail-on-missing:
+    description: 'Fail if GPG inputs are not provided (set true for Maven Central, false for GitHub Packages)'
+    required: false
+    default: 'false'
+outputs:
+  gpg-key-imported:
+    description: 'Whether the GPG key was successfully imported'
+    value: ${{ steps.skip.outputs.imported }}
+  gpg-key-skipped:
+    description: 'Whether GPG setup was skipped because no key was provided'
+    value: ${{ steps.skip.outputs.skipped }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Check GPG inputs
+      id: check
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.gpg-signing-key-id }}" ] || [ -z "${{ inputs.gpg-signing-key }}" ]; then
+          echo "::notice::GPG inputs not provided. Skipping GPG setup."
+          echo "skipping=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipping=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Import GPG key
+      id: import
+      if: steps.check.outputs.skipping == 'false'
+      shell: bash
+      run: |
+        echo "${{ inputs.gpg-signing-key }}" | gpg --import --batch --yes
+        gpg --list-secret-keys --keyid-format=long
+        echo "imported=true" >> "$GITHUB_OUTPUT"
+
+    - name: Skip notice
+      if: steps.check.outputs.skipping == 'true'
+      id: skip
+      shell: bash
+      run: |
+        echo "imported=false" >> "$GITHUB_OUTPUT"
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+
+    - name: Set default state when not skipped
+      if: steps.check.outputs.skipping == 'false'
+      id: not-skip
+      shell: bash
+      run: |
+        echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+    - name: Configure git to use GPG
+      if: steps.check.outputs.skipping == 'false'
+      shell: bash
+      run: |
+        git config --global user.signingkey "${{ inputs.gpg-signing-key-id }}"
+        git config --global commit.gpgsign true
+        if [ -n "${{ inputs.gpg-signing-password }}" ]; then
+          echo "${{ inputs.gpg-signing-password }}" | gpg --command-fd 0 --pinentry-mode loopback --expert --edit-key "${{ inputs.gpg-signing-key-id }}" save 2>/dev/null || true
+        fi
+
+    - name: Fail if required
+      if: inputs.fail-on-missing == 'true' && steps.check.outputs.skipping == 'true'
+      shell: bash
+      run: |
+        echo "::error::GPG inputs are required but not provided. See docs/06-semantic-versioning-en-java.md section 10.3"
+        exit 1
