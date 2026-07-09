@@ -1,6 +1,6 @@
-# galaxy-training-devops
+# nova-devops
 
-Repositorio centralizado de workflows reutilizables de GitHub Actions para el ecosistema de librerías Java de `pe.edu.galaxy.training.java.libs`.
+Repositorio centralizado de workflows reutilizables de GitHub Actions para el ecosistema de librerías Java de `pe.edu.galaxy.training.java`.
 
 Estos workflows proporcionan un pipeline de CI/CD estandarizado con variantes dedicadas para **Maven** y **Gradle KTS**, lo que permite un caché de dependencias nativo y pipelines más limpios sin pasos condicionales.
 
@@ -64,7 +64,7 @@ Ninguno.
 ```yaml
 jobs:
   build:
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-build-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-build-maven.yml@main
     with:
       java-version: '25'
 ```
@@ -101,10 +101,10 @@ Workflow reutilizable que genera el reporte de cobertura con JaCoCo y ejecuta el
 ```yaml
 jobs:
   sonar:
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-sonarcloud-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-maven.yml@main
     with:
       sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_galaxy-training-mask-utils
+      sonar-project-key: mi-organizacion_nova-mask-utils
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 ```
@@ -154,7 +154,7 @@ El tipo de incremento se determina por las labels del PR:
 ```yaml
 jobs:
   version-bump:
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-version-bump-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-version-bump-maven.yml@main
     secrets:
       GH_PAT: ${{ secrets.GH_PAT }}
 ```
@@ -203,7 +203,7 @@ El `pom.xml` debe incluir la sección `distributionManagement`:
 jobs:
   publish:
     needs: version-bump
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-publish-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-publish-maven.yml@main
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -244,7 +244,7 @@ Ninguno.
 ```yaml
 jobs:
   build:
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-build-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-build-gradle.yml@main
 ```
 
 ---
@@ -279,10 +279,10 @@ Workflow reutilizable que genera el reporte de cobertura con JaCoCo y ejecuta el
 ```yaml
 jobs:
   sonar:
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
     with:
       sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_galaxy-training-date-utils
+      sonar-project-key: mi-organizacion_nova-date-utils
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 ```
@@ -332,7 +332,7 @@ El tipo de incremento se determina por las labels del PR:
 ```yaml
 jobs:
   version-bump:
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-version-bump-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-version-bump-gradle.yml@main
     secrets:
       GH_PAT: ${{ secrets.GH_PAT }}
 ```
@@ -391,7 +391,7 @@ publishing {
 jobs:
   publish:
     needs: version-bump
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-publish-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-publish-gradle.yml@main
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -417,25 +417,25 @@ on:
 jobs:
   build:
     if: github.event_name == 'pull_request'
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-build-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-build-maven.yml@main
 
   sonar:
     if: github.event_name == 'pull_request'
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-sonarcloud-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-maven.yml@main
     with:
       sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_galaxy-training-mask-utils
+      sonar-project-key: mi-organizacion_nova-mask-utils
     secrets: inherit
 
   version-bump:
     if: github.event_name == 'push'
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-version-bump-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-version-bump-maven.yml@main
     secrets: inherit
 
   publish:
     if: github.event_name == 'push'
     needs: version-bump
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-publish-maven.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-publish-maven.yml@main
     secrets: inherit
 ```
 
@@ -454,25 +454,25 @@ on:
 jobs:
   build:
     if: github.event_name == 'pull_request'
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-build-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-build-gradle.yml@main
 
   sonar:
     if: github.event_name == 'pull_request'
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
     with:
       sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_galaxy-training-date-utils
+      sonar-project-key: mi-organizacion_nova-date-utils
     secrets: inherit
 
   version-bump:
     if: github.event_name == 'push'
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-version-bump-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-version-bump-gradle.yml@main
     secrets: inherit
 
   publish:
     if: github.event_name == 'push'
     needs: version-bump
-    uses: <org>/galaxy-training-devops/.github/workflows/reusable-publish-gradle.yml@main
+    uses: <org>/nova-devops/.github/workflows/reusable-publish-gradle.yml@main
     secrets: inherit
 ```
 
@@ -482,10 +482,10 @@ jobs:
 
 | Librería | Repositorio | Build Tool | Sonar Project Key |
 |---|---|---|---|
-| mask-utils | `galaxy-training-mask-utils` | Maven | `<org>_galaxy-training-mask-utils` |
-| api-standard | `galaxy-training-api-standard` | Gradle KTS | `<org>_galaxy-training-api-standard` |
-| date-utils | `galaxy-training-date-utils` | Gradle KTS | `<org>_galaxy-training-date-utils` |
-| mapper-utils | `galaxy-training-mapper-utils` | Gradle KTS | `<org>_galaxy-training-mapper-utils` |
+| mask-utils | `nova-mask-utils` | Maven | `<org>_nova-mask-utils` |
+| api-standard | `nova-api-standard` | Gradle KTS | `<org>_nova-api-standard` |
+| date-utils | `nova-date-utils` | Gradle KTS | `<org>_nova-date-utils` |
+| mapper-utils | `nova-mapper-utils` | Gradle KTS | `<org>_nova-mapper-utils` |
 
 ## Secretos Necesarios
 
