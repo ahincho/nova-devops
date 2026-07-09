@@ -19,9 +19,47 @@ inputs:
     description: 'If true, only print commands without executing'
     required: false
     default: 'false'
+  github-token:
+    description: 'GitHub token for authentication (pass secrets.GITHUB_TOKEN from the caller workflow)'
+    required: false
+    default: ''
+  maven-username:
+    description: 'Maven Central / Sonatype username (required for maven-central registry)'
+    required: false
+    default: ''
+  maven-token:
+    description: 'Maven Central / Sonatype token (required for maven-central registry)'
+    required: false
+    default: ''
+  nexus-username:
+    description: 'Nexus username (required for nexus registry)'
+    required: false
+    default: ''
+  nexus-password:
+    description: 'Nexus password (required for nexus registry)'
+    required: false
+    default: ''
+outputs:
+  effective-visibility:
+    description: 'Resolved visibility value used for publish'
+    value: ${{ steps.visibility.outputs.value }}
 runs:
   using: 'composite'
   steps:
+    - name: Resolve effective token
+      id: token
+      shell: bash
+      env:
+        INPUT_TOKEN: ${{ inputs.github-token }}
+        FALLBACK_TOKEN: ${{ github.token }}
+      run: |
+        # Prefer explicit input; fallback to github.token (accessible in composite actions)
+        if [ -n "${INPUT_TOKEN}" ]; then
+          echo "token=${INPUT_TOKEN}" >> "$GITHUB_OUTPUT"
+        else
+          echo "token=${FALLBACK_TOKEN}" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Resolve effective visibility
       id: visibility
       shell: bash
@@ -55,21 +93,71 @@ runs:
         fi
         echo "Visibility validation OK: repo=${REPO_VIS}, package=${PKG_VIS}"
 
+    - name: Configure Maven settings.xml (for Maven builds)
+      if: inputs.build-tool == 'maven'
+      shell: bash
+      env:
+        EFFECTIVE_TOKEN: ${{ steps.token.outputs.token }}
+        MAVEN_USERNAME: ${{ inputs.maven-username }}
+        MAVEN_TOKEN: ${{ inputs.maven-token }}
+      run: |
+        mkdir -p ~/.m2
+        cat > ~/.m2/settings.xml <<EOF
+        <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                                      https://maven.apache.org/xsd/settings-1.0.0.xsd">
+          <servers>
+            <server>
+              <id>github</id>
+              <username>${GITHUB_ACTOR}</username>
+              <password>${EFFECTIVE_TOKEN}</password>
+            </server>
+            <server>
+              <id>central</id>
+              <username>${MAVEN_USERNAME}</username>
+              <password>${MAVEN_TOKEN}</password>
+            </server>
+          </servers>
+        </settings>
+        EOF
+        echo "Maven settings.xml configured with github + central servers."
+
+    - name: Dry-run notice
+      if: inputs.dry-run == 'true'
+      shell: bash
+      run: echo "::notice::DRY-RUN mode active. No artifacts will be published to remote registries."
+
     - name: Dispatch to GitHub Packages
-      if: inputs.registry == 'github-packages'
+      if: inputs.registry == 'github-packages' && inputs.dry-run != 'true'
       shell: bash
       run: |
         if [ "${{ inputs.build-tool }}" = "gradle" ]; then
           ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
         else
-          mvn deploy -DskipTests
+          mvn deploy -DskipTests -Dvisibility=${{ steps.visibility.outputs.value }}
         fi
       env:
         GITHUB_ACTOR: ${{ github.actor }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+
+    - name: Dispatch to GitHub Packages (dry-run)
+      if: inputs.registry == 'github-packages' && inputs.dry-run == 'true'
+      shell: bash
+      run: |
+        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
+          ./gradlew publishToMavenLocal -Pvisibility=${{ steps.visibility.outputs.value }}
+        else
+          mkdir -p /tmp/maven-dry-run
+          mvn deploy -DskipTests -Dvisibility=${{ steps.visibility.outputs.value }} \
+            -DaltDeploymentRepository=local::default::file:///tmp/maven-dry-run
+        fi
+      env:
+        GITHUB_ACTOR: ${{ github.actor }}
+        GITHUB_TOKEN: ${{ steps.token.outputs.token }}
 
     - name: Dispatch to Maven Central (via Sonatype)
-      if: inputs.registry == 'maven-central' || inputs.registry == 'sonatype-staging'
+      if: (inputs.registry == 'maven-central' || inputs.registry == 'sonatype-staging') && inputs.dry-run != 'true'
       shell: bash
       run: |
         if [ "${{ inputs.build-tool }}" = "gradle" ]; then
@@ -79,12 +167,12 @@ runs:
         fi
       env:
         GITHUB_ACTOR: ${{ github.actor }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
-        MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
+        GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        MAVEN_USERNAME: ${{ inputs.maven-username }}
+        MAVEN_TOKEN: ${{ inputs.maven-token }}
 
     - name: Dispatch to Nexus
-      if: inputs.registry == 'nexus'
+      if: inputs.registry == 'nexus' && inputs.dry-run != 'true'
       shell: bash
       run: |
         if [ "${{ inputs.build-tool }}" = "gradle" ]; then
@@ -94,6 +182,6 @@ runs:
         fi
       env:
         GITHUB_ACTOR: ${{ github.actor }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-        NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        NEXUS_USERNAME: ${{ inputs.nexus-username }}
+        NEXUS_PASSWORD: ${{ inputs.nexus-password }}

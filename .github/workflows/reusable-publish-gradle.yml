@@ -44,49 +44,22 @@ jobs:
           java-version: ${{ inputs.java-version }}
           build-tool: gradle
 
-      - name: Resolve package visibility
-        id: visibility
-        env:
-          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
-          VAR_VISIBILITY: ${{ vars.NOVA_PACKAGE_VISIBILITY }}
-          INPUT_VISIBILITY: ${{ inputs.visibility }}
-        run: |
-          # Priority: input > vars.NOVA_PACKAGE_VISIBILITY > 'public'
-          if [ -n "${INPUT_VISIBILITY}" ]; then
-            EFFECTIVE="${INPUT_VISIBILITY}"
-          elif [ -n "${VAR_VISIBILITY}" ]; then
-            EFFECTIVE="${VAR_VISIBILITY}"
-          else
-            EFFECTIVE="public"
-          fi
-          echo "value=${EFFECTIVE}" >> "$GITHUB_OUTPUT"
-          echo "Effective visibility: ${EFFECTIVE} (repo=${REPO_VISIBILITY}, var=${VAR_VISIBILITY}, input=${INPUT_VISIBILITY})"
+      - name: Nova Validate Build
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        with:
+          min-java-version: ${{ inputs.java-version }}
 
-      - name: Validate visibility compatibility
-        shell: bash
-        run: |
-          REPO_VIS="${{ github.event.repository.visibility }}"
-          PKG_VIS="${{ steps.visibility.outputs.value }}"
-          if [ "${REPO_VIS}" = "public" ] && [ "${PKG_VIS}" = "private" ]; then
-            echo "::error::Cannot publish private package from public repo"
-            exit 1
-          fi
-          if [ "${REPO_VIS}" = "private" ] && [ "${PKG_VIS}" = "public" ]; then
-            echo "::error::Cannot publish public package from private repo"
-            exit 1
-          fi
-          echo "Visibility validation OK: repo=${REPO_VIS}, package=${PKG_VIS}"
+      - name: Nova Gather Facts
+        id: facts
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        with:
+          version-source: gradle-properties
 
-      - name: Publish to GitHub Packages
-        if: inputs.dry-run != 'true'
-        run: ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Dry-run mode (publishToMavenLocal)
-        if: inputs.dry-run == 'true'
-        run: ./gradlew publishToMavenLocal -Pvisibility=${{ steps.visibility.outputs.value }}
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Nova Publish Aggregator
+        uses: ahincho/nova-devops/.github/actions/nova-publish-aggregator@main
+        with:
+          registry: github-packages
+          build-tool: gradle
+          visibility: ${{ inputs.visibility }}
+          dry-run: ${{ inputs.dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

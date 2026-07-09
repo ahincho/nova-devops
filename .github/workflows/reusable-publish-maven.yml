@@ -14,7 +14,7 @@ on:
         type: string
         default: ''
       dry-run:
-        description: 'If true, runs `mvn deploy -DskipTests` in altDeploymentRepository=local for verification'
+        description: 'If true, runs `mvn deploy` to a local file:// repo for verification'
         required: false
         type: string
         default: 'false'
@@ -41,71 +41,23 @@ jobs:
           java-version: ${{ inputs.java-version }}
           build-tool: maven
 
-      - name: Resolve package visibility
-        id: visibility
-        env:
-          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
-          VAR_VISIBILITY: ${{ vars.NOVA_PACKAGE_VISIBILITY }}
-          INPUT_VISIBILITY: ${{ inputs.visibility }}
-        run: |
-          if [ -n "${INPUT_VISIBILITY}" ]; then
-            EFFECTIVE="${INPUT_VISIBILITY}"
-          elif [ -n "${VAR_VISIBILITY}" ]; then
-            EFFECTIVE="${VAR_VISIBILITY}"
-          else
-            EFFECTIVE="public"
-          fi
-          echo "value=${EFFECTIVE}" >> "$GITHUB_OUTPUT"
-          echo "Effective visibility: ${EFFECTIVE}"
+      - name: Nova Validate Build
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        with:
+          min-java-version: ${{ inputs.java-version }}
 
-      - name: Validate visibility compatibility
-        shell: bash
-        run: |
-          REPO_VIS="${{ github.event.repository.visibility }}"
-          PKG_VIS="${{ steps.visibility.outputs.value }}"
-          if [ "${REPO_VIS}" = "public" ] && [ "${PKG_VIS}" = "private" ]; then
-            echo "::error::Cannot publish private package from public repo"
-            exit 1
-          fi
-          if [ "${REPO_VIS}" = "private" ] && [ "${PKG_VIS}" = "public" ]; then
-            echo "::error::Cannot publish public package from private repo"
-            exit 1
-          fi
-          echo "Visibility validation OK: repo=${REPO_VIS}, package=${PKG_VIS}"
+      - name: Nova Gather Facts
+        id: facts
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        with:
+          version-source: file
+          version-file: pom.xml
 
-      - name: Configure Maven settings.xml for GitHub Packages
-        shell: bash
-        run: |
-          mkdir -p ~/.m2
-          cat > ~/.m2/settings.xml <<'EOF'
-          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
-                                        https://maven.apache.org/xsd/settings-1.0.0.xsd">
-            <servers>
-              <server>
-                <id>github</id>
-                <username>${env.GITHUB_ACTOR}</username>
-                <password>${env.GITHUB_TOKEN}</password>
-              </server>
-            </servers>
-          </settings>
-          EOF
-
-      - name: Publish to GitHub Packages
-        if: inputs.dry-run != 'true'
-        run: mvn deploy -DskipTests -Dvisibility=${{ steps.visibility.outputs.value }}
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Dry-run mode (deploy to file://)
-        if: inputs.dry-run == 'true'
-        run: |
-          mkdir -p /tmp/maven-dry-run
-          mvn deploy -DskipTests \
-            -Dvisibility=${{ steps.visibility.outputs.value }} \
-            -DaltDeploymentRepository=local::default::file:///tmp/maven-dry-run
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Nova Publish Aggregator
+        uses: ahincho/nova-devops/.github/actions/nova-publish-aggregator@main
+        with:
+          registry: github-packages
+          build-tool: maven
+          visibility: ${{ inputs.visibility }}
+          dry-run: ${{ inputs.dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

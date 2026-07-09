@@ -20,17 +20,22 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Setup Gradle with GitHub Actions Cache
-        uses: gradle/actions/setup-gradle@v4
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
         with:
-          cache-read-only: ${{ github.event_name != 'push' }}
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
           java-version: ${{ inputs.java-version }}
-          cache: 'gradle'
+          build-tool: gradle
+
+      - name: Nova Validate Build
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        with:
+          min-java-version: ${{ inputs.java-version }}
+
+      - name: Nova Gather Facts
+        id: facts
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        with:
+          version-source: gradle-properties
 
       - name: Build and Test
         run: ./gradlew build

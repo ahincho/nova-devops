@@ -17,12 +17,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
         with:
-          distribution: temurin
           java-version: ${{ inputs.java-version }}
-          cache: 'maven'
+          build-tool: maven
+
+      - name: Nova Validate Build
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        with:
+          min-java-version: ${{ inputs.java-version }}
+
+      - name: Nova Gather Facts
+        id: facts
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        with:
+          version-source: file
+          version-file: pom.xml
 
       - name: Build and Test
         run: mvn verify
