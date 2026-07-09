@@ -1,0 +1,100 @@
+name: Reusable OWASP Dependency Check
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '25'
+      build-tool:
+        description: 'Build tool (maven | gradle)'
+        required: false
+        type: string
+        default: 'gradle'
+      fail-on-cvss:
+        description: 'Fail if any CVE has CVSS score >= this value (0-10, 0 = fail on any)'
+        required: false
+        type: string
+        default: '7'
+      suppression-file:
+        description: 'Path to OWASP suppression XML file (optional, for known false positives)'
+        required: false
+        type: string
+        default: ''
+      upload-report:
+        description: 'Upload HTML report as artifact'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  owasp-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make gradlew executable
+        if: inputs.build-tool == 'gradle'
+        run: chmod +x ./gradlew
+
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        with:
+          java-version: ${{ inputs.java-version }}
+          build-tool: ${{ inputs.build-tool }}
+
+      - name: Nova Gather Facts
+        id: facts
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+
+      - name: Cache NVD Database
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/dependency-check-data
+          key: ${{ runner.os }}-nvd-${{ hashFiles('**/build.gradle*', '**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-nvd-
+
+      - name: Run OWASP Dependency Check (Gradle)
+        if: inputs.build-tool == 'gradle'
+        run: |
+          ARGS="dependencyCheckAnalyze --info"
+          ARGS="${ARGS} -Pdependency-check.failBuildOnCVSS=${{ inputs.fail-on-cvss }}"
+          if [ -n "${{ inputs.suppression-file }}" ]; then
+            ARGS="${ARGS} -Pdependency-check.suppressionFile=${{ inputs.suppression-file }}"
+          fi
+          ./gradlew ${ARGS}
+
+      - name: Run OWASP Dependency Check (Maven)
+        if: inputs.build-tool == 'maven'
+        run: |
+          ARGS="-DfailBuildOnCVSS=${{ inputs.fail-on-cvss }}"
+          if [ -n "${{ inputs.suppression-file }}" ]; then
+            ARGS="${ARGS} -DsuppressionFile=${{ inputs.suppression-file }}"
+          fi
+          mvn org.owasp:dependency-check-maven:check ${ARGS}
+
+      - name: Upload OWASP Report
+        if: inputs.upload-report && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-dependency-check-report
+          path: |
+            **/build/reports/dependency-check-report.html
+            **/target/dependency-check-report.html
+
+      - name: OWASP Summary
+        if: always()
+        run: |
+          echo "## OWASP Dependency Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Setting | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fail on CVSS >= | ${{ inputs.fail-on-cvss }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build tool | ${{ inputs.build-tool }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Suppression file | ${{ inputs.suppression-file || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | ${{ steps.facts.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"

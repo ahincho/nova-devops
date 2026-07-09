@@ -1,0 +1,93 @@
+name: Reusable Build Matrix (Multi-Java)
+
+on:
+  workflow_call:
+    inputs:
+      java-versions:
+        description: 'JSON array of Java versions to test against (e.g., ["21", "25"])'
+        required: false
+        type: string
+        default: '["21", "25"]'
+      build-tool:
+        description: 'Build tool (maven | gradle)'
+        required: false
+        type: string
+        default: 'gradle'
+      fail-fast:
+        description: 'Stop all matrix jobs on first failure'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  matrix-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        java-version: ${{ fromJSON(inputs.java-versions) }}
+
+    name: Build (Java ${{ matrix.java-version }})
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make gradlew executable
+        if: inputs.build-tool == 'gradle'
+        run: chmod +x ./gradlew
+
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        with:
+          java-version: ${{ matrix.java-version }}
+          build-tool: ${{ inputs.build-tool }}
+
+      - name: Nova Validate Build
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        with:
+          min-java-version: '21'
+
+      - name: Nova Gather Facts
+        id: facts
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        with:
+          version-source: ${{ inputs.build-tool == 'gradle' && 'gradle-properties' || 'file' }}
+          version-file: ${{ inputs.build-tool == 'gradle' && 'gradle.properties' || 'pom.xml' }}
+
+      - name: Build and Test (Gradle)
+        if: inputs.build-tool == 'gradle'
+        run: ./gradlew build
+
+      - name: Build and Test (Maven)
+        if: inputs.build-tool == 'maven'
+        run: mvn verify
+
+      - name: Upload Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-java-${{ matrix.java-version }}
+          path: |
+            **/build/reports/tests/**
+            **/target/surefire-reports/**
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: matrix-build
+    if: always()
+
+    steps:
+      - name: Matrix Summary
+        run: |
+          echo "## Build Matrix Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Java Version | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          VERSIONS='${{ inputs.java-versions }}'
+          echo "${VERSIONS}" | jq -r '.[]' | while read -r ver; do
+            echo "| ${ver} | ${{ needs.matrix-build.result == 'success' && '✅' || '❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Build tool: **${{ inputs.build-tool }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fail-fast: **${{ inputs.fail-fast }}**" >> "$GITHUB_STEP_SUMMARY"
