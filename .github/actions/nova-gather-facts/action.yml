@@ -1,0 +1,110 @@
+name: 'Gather Nova Build Facts'
+description: 'Collect build facts (version, branch, commit SHA, is-snapshot) and expose as outputs for downstream steps'
+inputs:
+  version-source:
+    description: 'Source of version (file | gradle-properties | env | package-json)'
+    required: false
+    default: 'gradle-properties'
+  version-file:
+    description: 'Path to version file (when source is file)'
+    required: false
+    default: 'gradle.properties'
+  fallback-version:
+    description: 'Version to use when source is not available'
+    required: false
+    default: '0.0.0'
+outputs:
+  version:
+    description: 'Project version (e.g., 1.0.0, 0.1.0-SNAPSHOT, 1.0.0-RC1)'
+    value: ${{ steps.collect.outputs.version }}
+  branch:
+    description: 'Git branch name (or tag for tag-triggered runs)'
+    value: ${{ steps.collect.outputs.branch }}
+  commit-sha:
+    description: 'Full commit SHA'
+    value: ${{ steps.collect.outputs.commit-sha }}
+  commit-sha-short:
+    description: 'Short commit SHA (7 chars)'
+    value: ${{ steps.collect.outputs.commit-sha-short }}
+  is-snapshot:
+    description: 'Whether the version is a snapshot (contains -SNAPSHOT, -RC, -BETA, -ALPHA, -MILESTONE)'
+    value: ${{ steps.collect.outputs.is-snapshot }}
+  is-tag:
+    description: 'Whether the current ref is a git tag (v*.*.* pattern)'
+    value: ${{ steps.collect.outputs.is-tag }}
+  build-number:
+    description: 'GitHub Actions run number'
+    value: ${{ steps.collect.outputs.build-number }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Collect facts
+      id: collect
+      shell: bash
+      run: |
+        # Branch / ref
+        if [ -n "${GITHUB_REF_NAME:-}" ]; then
+          BRANCH="${GITHUB_REF_NAME}"
+        else
+          BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        fi
+        echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+        # Commit SHA
+        SHA=$(git rev-parse HEAD 2>/dev/null || echo "0000000")
+        echo "commit-sha=${SHA}" >> "$GITHUB_OUTPUT"
+        echo "commit-sha-short=${SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+        # Build number
+        BUILD_NUM="${GITHUB_RUN_NUMBER:-0}"
+        echo "build-number=${BUILD_NUM}" >> "$GITHUB_OUTPUT"
+
+        # Version
+        VERSION=""
+        case "${{ inputs.version-source }}" in
+          file|gradle-properties)
+            if [ -f "${{ inputs.version-file }}" ]; then
+              VERSION=$(grep '^version' "${{ inputs.version-file }}" | sed 's/version[ ]*=[ ]*//' | sed 's/^["'\'']//;s/["'\'']$//' | head -1)
+            fi
+            ;;
+          env)
+            VERSION="${NOVA_VERSION:-${{ inputs.fallback-version }}}"
+            ;;
+          package-json)
+            if [ -f "package.json" ]; then
+              VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "")
+            fi
+            ;;
+          *)
+            echo "::warning::Unknown version-source: ${{ inputs.version-source }}, using fallback"
+            VERSION="${{ inputs.fallback-version }}"
+            ;;
+        esac
+        VERSION="${VERSION:-${{ inputs.fallback-version }}}"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+        # Is snapshot?
+        if [[ "$VERSION" == *"-SNAPSHOT"* ]] || [[ "$VERSION" == *"-RC"* ]] || \
+           [[ "$VERSION" == *"-BETA"* ]] || [[ "$VERSION" == *"-ALPHA"* ]] || \
+           [[ "$VERSION" == *"-MILESTONE"* ]]; then
+          echo "is-snapshot=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is-snapshot=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Is tag?
+        if [[ "$BRANCH" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
+          echo "is-tag=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is-tag=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "================================"
+        echo "Nova Build Facts:"
+        echo "  Branch:       ${BRANCH}"
+        echo "  Commit SHA:   ${SHA:0:7}"
+        echo "  Version:      ${VERSION}"
+        echo "  Is snapshot:  $(cat "$GITHUB_OUTPUT" | grep is-snapshot | cut -d= -f2)"
+        echo "  Is tag:       $(cat "$GITHUB_OUTPUT" | grep is-tag | cut -d= -f2)"
+        echo "  Build number: ${BUILD_NUM}"
+        echo "================================"

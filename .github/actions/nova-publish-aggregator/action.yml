@@ -1,0 +1,99 @@
+name: 'Nova Publish Aggregator'
+description: 'Dispatch publish to the correct registry based on inputs (github-packages | maven-central | nexus | sonatype-staging)'
+inputs:
+  registry:
+    description: 'Target registry (github-packages | maven-central | nexus | sonatype-staging)'
+    required: true
+  visibility:
+    description: 'Package visibility (public | private). Defaults to vars.NOVA_PACKAGE_VISIBILITY if set, otherwise "public".'
+    required: false
+    default: ''
+  build-tool:
+    description: 'Build tool (maven | gradle)'
+    required: true
+  java-version:
+    description: 'Java version'
+    required: false
+    default: '25'
+  dry-run:
+    description: 'If true, only print commands without executing'
+    required: false
+    default: 'false'
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve effective visibility
+      id: visibility
+      shell: bash
+      env:
+        INPUT_VISIBILITY: ${{ inputs.visibility }}
+        VAR_VISIBILITY: ${{ vars.NOVA_PACKAGE_VISIBILITY }}
+      run: |
+        if [ -n "${INPUT_VISIBILITY}" ]; then
+          EFFECTIVE="${INPUT_VISIBILITY}"
+        elif [ -n "${VAR_VISIBILITY}" ]; then
+          EFFECTIVE="${VAR_VISIBILITY}"
+        else
+          EFFECTIVE="public"
+        fi
+        echo "value=${EFFECTIVE}" >> "$GITHUB_OUTPUT"
+        echo "Effective visibility: ${EFFECTIVE} (input=${INPUT_VISIBILITY}, var=${VAR_VISIBILITY})"
+
+    - name: Validate visibility against repo visibility
+      shell: bash
+      env:
+        REPO_VIS: ${{ github.event.repository.visibility }}
+        PKG_VIS: ${{ steps.visibility.outputs.value }}
+      run: |
+        if [ "${REPO_VIS}" = "public" ] && [ "${PKG_VIS}" = "private" ]; then
+          echo "::error::Cannot publish private package from public repo"
+          exit 1
+        fi
+        if [ "${REPO_VIS}" = "private" ] && [ "${PKG_VIS}" = "public" ]; then
+          echo "::error::Cannot publish public package from private repo"
+          exit 1
+        fi
+        echo "Visibility validation OK: repo=${REPO_VIS}, package=${PKG_VIS}"
+
+    - name: Dispatch to GitHub Packages
+      if: inputs.registry == 'github-packages'
+      shell: bash
+      run: |
+        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
+          ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
+        else
+          mvn deploy -DskipTests
+        fi
+      env:
+        GITHUB_ACTOR: ${{ github.actor }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Dispatch to Maven Central (via Sonatype)
+      if: inputs.registry == 'maven-central' || inputs.registry == 'sonatype-staging'
+      shell: bash
+      run: |
+        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
+          ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository -Pvisibility=${{ steps.visibility.outputs.value }}
+        else
+          mvn deploy -P central -DskipTests
+        fi
+      env:
+        GITHUB_ACTOR: ${{ github.actor }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+        MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
+
+    - name: Dispatch to Nexus
+      if: inputs.registry == 'nexus'
+      shell: bash
+      run: |
+        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
+          ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
+        else
+          mvn deploy -DskipTests
+        fi
+      env:
+        GITHUB_ACTOR: ${{ github.actor }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+        NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}

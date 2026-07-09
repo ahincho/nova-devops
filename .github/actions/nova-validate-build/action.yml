@@ -1,0 +1,105 @@
+name: 'Validate Nova Build Prerequisites'
+description: 'Verify build prerequisites before running Gradle or Maven (Java version, secrets, valid metadata)'
+inputs:
+  min-java-version:
+    description: 'Minimum required Java version'
+    required: false
+    default: '25'
+  enforce-no-secrets:
+    description: 'Fail if common secret patterns are found in tracked files'
+    required: false
+    default: 'true'
+outputs:
+  validation-result:
+    description: 'PASS or FAIL'
+    value: ${{ steps.validate.outputs.result }}
+  java-version-detected:
+    description: 'Detected Java version'
+    value: ${{ steps.check-java.outputs.version }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Check Java version
+      id: check-java
+      shell: bash
+      run: |
+        JAVA_VER=$(java -version 2>&1 | head -1 | awk -F '"' '{print $2}')
+        echo "Detected Java version: ${JAVA_VER}"
+        echo "version=${JAVA_VER}" >> "$GITHUB_OUTPUT"
+        
+        # Extract major version
+        MAJOR=$(echo "${JAVA_VER}" | awk -F. '{ if ($1 ~ /[0-9]+/) print $1; else print $2 }' | grep -oE '[0-9]+' | head -1)
+        MIN_MAJOR=${{ inputs.min-java-version }}
+        if [ "${MAJOR}" -lt "${MIN_MAJOR}" ]; then
+          echo "::error::Java ${JAVA_VER} is below minimum required (${MIN_MAJOR})"
+          exit 1
+        fi
+
+    - name: Check for committed secrets
+      if: inputs.enforce-no-secrets == 'true'
+      shell: bash
+      run: |
+        PATTERNS=(
+          'AKIA[0-9A-Z]{16}'                    # AWS access key
+          '-----BEGIN RSA PRIVATE KEY-----'     # RSA private key
+          '-----BEGIN OPENSSH PRIVATE KEY-----' # SSH private key
+          'glpat-[A-Za-z0-9_-]{20,}'            # GitLab PAT
+          'ghp_[A-Za-z0-9]{36}'                 # GitHub PAT (classic)
+          'github_pat_[A-Za-z0-9_]{82}'         # GitHub PAT (fine-grained)
+          'xox[abprs]-[A-Za-z0-9-]+'            # Slack tokens
+        )
+
+        FOUND=0
+        for pattern in "${PATTERNS[@]}"; do
+          if git grep -E "$pattern" -- ':(exclude)*.md' ':(exclude)docs/*' ':(exclude)CHANGELOG.md' 2>/dev/null | grep -v "^Binary file" > /dev/null; then
+            echo "::error::Found potential secret matching pattern: $pattern"
+            git grep -E "$pattern" -- ':(exclude)*.md' ':(exclude)docs/*' ':(exclude)CHANGELOG.md' 2>/dev/null | head -3
+            FOUND=1
+          fi
+        done
+        if [ $FOUND -eq 1 ]; then
+          echo "::error::Secrets detected in tracked files. Aborting."
+          exit 1
+        fi
+        echo "No secrets detected."
+
+    - name: Validate Gradle/Maven metadata
+      shell: bash
+      run: |
+        if [ -f "gradle.properties" ]; then
+          if ! grep -q "^group" gradle.properties && ! grep -q "^groupId" build.gradle*" 2>/dev/null; then
+            echo "::warning::No 'group' defined in gradle.properties or 'groupId' in build.gradle*"
+          fi
+          if ! grep -q "^version" gradle.properties; then
+            echo "::warning::No 'version' defined in gradle.properties (NOVA-SEMVER-04 missing?)"
+          fi
+        fi
+        if [ -f "pom.xml" ]; then
+          if ! grep -q "<groupId>" pom.xml; then
+            echo "::warning::No <groupId> in pom.xml"
+          fi
+          if ! grep -q "<version>" pom.xml; then
+            echo "::warning::No <version> in pom.xml"
+          fi
+        fi
+
+    - name: Check lefthook (local hook manager)
+      shell: bash
+      run: |
+        if [ -f "lefthook.yml" ]; then
+          if [ -f "package.json" ] && grep -q "lefthook" package.json; then
+            HOOK_PATH=".git/hooks/commit-msg"
+            if [ -f "$HOOK_PATH" ] || [ -L "$HOOK_PATH" ]; then
+              echo "lefthook commit-msg hook is installed."
+            else
+              echo "::warning::lefthook.yml present but commit-msg hook not installed locally. Developers should run 'npm install' to trigger the prepare script."
+            fi
+          fi
+        fi
+
+    - name: Set validation result
+      id: validate
+      shell: bash
+      run: |
+        echo "All Nova build prerequisites validated successfully."
+        echo "result=PASS" >> "$GITHUB_OUTPUT"
