@@ -8,6 +8,16 @@ on:
         required: false
         type: string
         default: '25'
+      visibility:
+        description: 'Package visibility (public | private). Defaults to vars.NOVA_PACKAGE_VISIBILITY if set, otherwise "public".'
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: 'If true, only print commands without executing (uses publishToMavenLocal)'
+        required: false
+        type: string
+        default: 'false'
     secrets:
       GITHUB_TOKEN:
         required: true
@@ -15,6 +25,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout code
@@ -22,15 +35,55 @@ jobs:
         with:
           ref: main
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@v1
         with:
-          distribution: temurin
           java-version: ${{ inputs.java-version }}
-          cache: 'gradle'
+          build-tool: gradle
+
+      - name: Resolve package visibility
+        id: visibility
+        env:
+          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
+          VAR_VISIBILITY: ${{ vars.NOVA_PACKAGE_VISIBILITY }}
+          INPUT_VISIBILITY: ${{ inputs.visibility }}
+        run: |
+          # Priority: input > vars.NOVA_PACKAGE_VISIBILITY > 'public'
+          if [ -n "${INPUT_VISIBILITY}" ]; then
+            EFFECTIVE="${INPUT_VISIBILITY}"
+          elif [ -n "${VAR_VISIBILITY}" ]; then
+            EFFECTIVE="${VAR_VISIBILITY}"
+          else
+            EFFECTIVE="public"
+          fi
+          echo "value=${EFFECTIVE}" >> "$GITHUB_OUTPUT"
+          echo "Effective visibility: ${EFFECTIVE} (repo=${REPO_VISIBILITY}, var=${VAR_VISIBILITY}, input=${INPUT_VISIBILITY})"
+
+      - name: Validate visibility compatibility
+        shell: bash
+        run: |
+          REPO_VIS="${{ github.event.repository.visibility }}"
+          PKG_VIS="${{ steps.visibility.outputs.value }}"
+          if [ "${REPO_VIS}" = "public" ] && [ "${PKG_VIS}" = "private" ]; then
+            echo "::error::Cannot publish private package from public repo"
+            exit 1
+          fi
+          if [ "${REPO_VIS}" = "private" ] && [ "${PKG_VIS}" = "public" ]; then
+            echo "::error::Cannot publish public package from private repo"
+            exit 1
+          fi
+          echo "Visibility validation OK: repo=${REPO_VIS}, package=${PKG_VIS}"
 
       - name: Publish to GitHub Packages
-        run: ./gradlew publish
+        if: inputs.dry-run != 'true'
+        run: ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dry-run mode (publishToMavenLocal)
+        if: inputs.dry-run == 'true'
+        run: ./gradlew publishToMavenLocal -Pvisibility=${{ steps.visibility.outputs.value }}
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

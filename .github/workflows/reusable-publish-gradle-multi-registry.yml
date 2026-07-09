@@ -1,0 +1,107 @@
+name: Reusable Publish Multi-Registry (Gradle)
+description: Publish a Gradle library to BOTH GitHub Packages and Maven Central (Sonatype OSSRH) in a single run
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '25'
+      visibility:
+        description: 'Package visibility for GitHub Packages (public | private). Defaults to vars.NOVA_PACKAGE_VISIBILITY if set, otherwise "public".'
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: 'If true, runs gradle publishDryRun to verify config without publishing'
+        required: false
+        type: string
+        default: 'false'
+      gpg-key-id:
+        description: 'GPG key fingerprint (passed as input from workflow secrets)'
+        required: false
+        type: string
+        default: ''
+      gpg-key:
+        description: 'GPG private key ASCII-armored (passed as input from workflow secrets)'
+        required: false
+        type: string
+        default: ''
+      gpg-password:
+        description: 'GPG passphrase (passed as input from workflow secrets)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+      MAVEN_USERNAME:
+        required: false
+        description: 'Sonatype OSSRH username. If not provided, Maven Central publish is skipped.'
+      MAVEN_TOKEN:
+        required: false
+        description: 'Sonatype OSSRH token. If not provided, Maven Central publish is skipped.'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@v1
+        with:
+          java-version: ${{ inputs.java-version }}
+          build-tool: gradle
+
+      - name: Nova Setup GPG
+        uses: ahincho/nova-devops/.github/actions/nova-setup-gpg@v1
+        with:
+          gpg-signing-key-id: ${{ inputs.gpg-key-id }}
+          gpg-signing-key: ${{ inputs.gpg-key }}
+          gpg-signing-password: ${{ inputs.gpg-password }}
+          fail-on-missing: 'false'
+
+      - name: Determine which registries to publish to
+        id: registries
+        env:
+          HAS_MAVEN_CREDS: ${{ secrets.MAVEN_USERNAME != '' && secrets.MAVEN_TOKEN != '' }}
+        run: |
+          if [ "${HAS_MAVEN_CREDS}" = "true" ]; then
+            echo "maven-central=true" >> "$GITHUB_OUTPUT"
+            echo "Will publish to: GitHub Packages + Maven Central"
+          else
+            echo "maven-central=false" >> "$GITHUB_OUTPUT"
+            echo "Will publish to: GitHub Packages only (Maven Central credentials not provided)"
+          fi
+
+      - name: Publish to GitHub Packages
+        if: inputs.dry-run != 'true'
+        run: ./gradlew publishGithubPublicationToGitHubPackagesRepository
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to Maven Central
+        if: inputs.dry-run != 'true' && steps.registries.outputs.maven-central == 'true'
+        run: ./gradlew publishMavenCentralPublicationToMavenCentralRepository
+        env:
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
+
+      - name: Dry-run mode
+        if: inputs.dry-run == 'true'
+        run: ./gradlew publishDryRun
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}

@@ -32,6 +32,19 @@ Estos workflows proporcionan un pipeline de CI/CD estandarizado con variantes de
 | [Release Please](#10-reusable-release-pleaseyml) | `reusable-release-please.yml` | Orquestador de release automático basado en `release-please` |
 | [Generador de CHANGELOG](#11-reusable-changelogyml) | `reusable-changelog.yml` | Auto-generación de CHANGELOG.md con `conventional-changelog-cli` |
 
+### Workflows de Publicacion Multi-Registry
+
+Workflows de publish con soporte para multiples registries (GitHub Packages, Maven Central, Nexus). Todos usan la composite action `nova-setup-java` y soportan `visibility` / `dry-run` inputs.
+
+| Workflow | Archivo | Descripción |
+|---|---|---|
+| [Multi-Registry Gradle](#12-reusable-publish-gradle-multi-registryyml) | `reusable-publish-gradle-multi-registry.yml` | Publica a GitHub Packages **y** Maven Central en 1 run |
+| [Multi-Registry Maven](#13-reusable-publish-maven-multi-registryyml) | `reusable-publish-maven-multi-registry.yml` | Publica a GitHub Packages **y** Maven Central en 1 run |
+| [Maven Central Gradle](#14-reusable-publish-gradle-maven-centralyml) | `reusable-publish-gradle-maven-central.yml` | Solo Maven Central (GPG **requerido**) |
+| [Maven Central Maven](#15-reusable-publish-maven-maven-centralyml) | `reusable-publish-maven-maven-central.yml` | Solo Maven Central (GPG **requerido**) |
+| [Nexus Gradle](#16-reusable-publish-gradle-nexusyml) | `reusable-publish-gradle-nexus.yml` | Solo Nexus on-premise (GPG opcional) |
+| [Nexus Maven](#17-reusable-publish-maven-nexusyml) | `reusable-publish-maven-nexus.yml` | Solo Nexus on-premise (GPG opcional) |
+
 ### Beneficio del Caché de Dependencias
 
 Al separar los workflows por herramienta de build, cada variante configura `actions/setup-java@v4` con el parámetro `cache` correspondiente (`'maven'` o `'gradle'`). Esto habilita el caché nativo de dependencias de GitHub Actions, reduciendo significativamente los tiempos de ejecución en pipelines subsecuentes.
@@ -183,13 +196,15 @@ jobs:
 
 ## 4. reusable-publish-maven.yml
 
-Workflow reutilizable que publica el artefacto JAR de la librería Maven en GitHub Packages.
+Workflow reutilizable que publica el artefacto JAR de la librería Maven en GitHub Packages. Soporta `visibility` configurable (public/private) y `dry-run`.
 
 ### Parámetros de Entrada
 
 | Parámetro | Tipo | Requerido | Default | Descripción |
 |---|---|---|---|---|
 | `java-version` | `string` | no | `'25'` | Versión de Java a usar |
+| `visibility` | `string` | no | `vars.NOVA_PACKAGE_VISIBILITY` o `'public'` | Visibilidad del paquete (`public` / `private`) |
+| `dry-run` | `string` | no | `'false'` | Si es `'true'`, hace deploy a `file:///tmp/maven-dry-run` |
 
 ### Secretos Requeridos
 
@@ -201,7 +216,13 @@ Workflow reutilizable que publica el artefacto JAR de la librería Maven en GitH
 
 | Paso | Comando |
 |---|---|
-| Publicación | `mvn deploy -DskipTests` |
+| Publicación | `mvn deploy -DskipTests -Dvisibility=$VISIBILITY` |
+
+### Notas
+
+- Usa la composite action `nova-setup-java` (sprint 1) que valida `pom.xml` y configura caché de Maven.
+- Valida que la visibilidad del paquete sea compatible con la visibilidad del repo.
+- Genera `~/.m2/settings.xml` con la credencial de GitHub Packages.
 
 ### Prerrequisitos en el Repositorio
 
@@ -361,13 +382,15 @@ jobs:
 
 ## 8. reusable-publish-gradle.yml
 
-Workflow reutilizable que publica el artefacto JAR de la librería Gradle en GitHub Packages.
+Workflow reutilizable que publica el artefacto JAR de la librería Gradle en GitHub Packages. Soporta `visibility` configurable (public/private) y `dry-run`.
 
 ### Parámetros de Entrada
 
 | Parámetro | Tipo | Requerido | Default | Descripción |
 |---|---|---|---|---|
 | `java-version` | `string` | no | `'25'` | Versión de Java a usar |
+| `visibility` | `string` | no | `vars.NOVA_PACKAGE_VISIBILITY` o `'public'` | Visibilidad del paquete (`public` / `private`) |
+| `dry-run` | `string` | no | `'false'` | Si es `'true'`, usa `gradle publishToMavenLocal` |
 
 ### Secretos Requeridos
 
@@ -379,7 +402,14 @@ Workflow reutilizable que publica el artefacto JAR de la librería Gradle en Git
 
 | Paso | Comando |
 |---|---|
-| Publicación | `./gradlew publish` |
+| Publicación | `./gradlew publish -Pvisibility=$VISIBILITY` |
+| Dry-run | `./gradlew publishToMavenLocal -Pvisibility=$VISIBILITY` |
+
+### Notas
+
+- Usa la composite action `nova-setup-java` (sprint 1) que valida `gradle.properties` y configura `gradle/actions/setup-gradle@v4`.
+- Valida que la visibilidad del paquete sea compatible con la visibilidad del repo.
+- La propiedad Gradle `-Pvisibility=$VISIBILITY` permite que el `build.gradle.kts` ajuste la configuracion segun la visibilidad.
 
 ### Prerrequisitos en el Repositorio
 
@@ -415,6 +445,153 @@ jobs:
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+---
+
+## 12. reusable-publish-gradle-multi-registry.yml
+
+Workflow reutilizable que publica una libreria Gradle a **GitHub Packages y Maven Central** en una sola ejecucion. Salta Maven Central si no se proporcionan las credenciales (`MAVEN_USERNAME` + `MAVEN_TOKEN`).
+
+### Parametros de Entrada
+
+| Parametro | Tipo | Requerido | Default | Descripcion |
+|---|---|---|---|---|
+| `java-version` | `string` | no | `'25'` | Version de Java |
+| `visibility` | `string` | no | `vars.NOVA_PACKAGE_VISIBILITY` o `'public'` | Visibilidad para GitHub Packages |
+| `dry-run` | `string` | no | `'false'` | Si es `'true'`, usa `gradle publishDryRun` |
+| `gpg-key-id` | `string` | no | `''` | Fingerprint GPG (pasado como input) |
+| `gpg-key` | `string` | no | `''` | Clave privada GPG (pasada como input) |
+| `gpg-password` | `string` | no | `''` | Passphrase GPG (opcional) |
+
+### Secretos Requeridos
+
+| Secreto | Requerido | Descripcion |
+|---|---|---|
+| `GITHUB_TOKEN` | si | Para autenticarse con GitHub Packages |
+| `MAVEN_USERNAME` | no | Sonatype OSSRH username (sin el, salta Maven Central) |
+| `MAVEN_TOKEN` | no | Sonatype OSSRH token (sin el, salta Maven Central) |
+
+### Notas
+
+- Usa `nova-setup-java` (composite action) y `nova-setup-gpg` con `fail-on-missing='false'`.
+- Detecta automaticamente si hay credenciales de Maven Central y decide a cual(es) registry(s) publicar.
+- Para que funcione end-to-end, el `build.gradle.kts` debe tener publications/repositories configurados para cada target.
+
+---
+
+## 13. reusable-publish-maven-multi-registry.yml
+
+Igual al #12 pero para proyectos **Maven**. Publica a GitHub Packages y Maven Central. Genera `~/.m2/settings.xml` automaticamente con las credenciales de ambos.
+
+### Parametros de Entrada
+
+Igual que #12.
+
+### Secretos Requeridos
+
+| Secreto | Requerido | Descripcion |
+|---|---|---|
+| `GITHUB_TOKEN` | si | Para autenticarse con GitHub Packages |
+| `MAVEN_USERNAME` | no | Sonatype OSSRH username (sin el, salta Maven Central) |
+| `MAVEN_TOKEN` | no | Sonatype OSSRH token (sin el, salta Maven Central) |
+
+### Notas
+
+- El `pom.xml` debe tener profiles separados (`github-publish`, `maven-central-publish`) para cada registry.
+
+---
+
+## 14. reusable-publish-gradle-maven-central.yml
+
+Workflow reutilizable que publica **solo a Maven Central** (Sonatype OSSRH). **GPG es REQUERIDO** (firma obligatoria de Maven Central).
+
+### Parametros de Entrada
+
+| Parametro | Tipo | Requerido | Default | Descripcion |
+|---|---|---|---|---|
+| `java-version` | `string` | no | `'25'` | Version de Java |
+| `gpg-key-id` | `string` | **si** | — | Fingerprint GPG |
+| `gpg-key` | `string` | **si** | — | Clave privada GPG ASCII-armored |
+| `gpg-password` | `string` | no | `''` | Passphrase GPG |
+| `dry-run` | `string` | no | `'false'` | Si es `'true'`, usa `--dry-run` |
+
+### Secretos Requeridos
+
+| Secreto | Descripcion |
+|---|---|
+| `MAVEN_USERNAME` | Sonatype OSSRH username |
+| `MAVEN_TOKEN` | Sonatype OSSRH token |
+
+### Notas
+
+- Usa `nova-setup-gpg` con `fail-on-missing='true'` (falla si no hay clave).
+- **Prereq (NOVA-SEMVER-14):** crear el namespace `pe.edu.nova` en Sonatype OSSRH.
+- **Prereq (NOVA-SEMVER-29):** generar la clave GPG real (backlog).
+
+---
+
+## 15. reusable-publish-maven-maven-central.yml
+
+Igual al #14 pero para proyectos **Maven**. Genera `settings.xml` con la credencial de Sonatype.
+
+### Parametros de Entrada
+
+Igual que #14.
+
+### Secretos Requeridos
+
+Igual que #14.
+
+### Notas
+
+- El `pom.xml` debe tener un profile `maven-central-publish` configurado.
+
+---
+
+## 16. reusable-publish-gradle-nexus.yml
+
+Workflow reutilizable que publica a un **Nexus on-premise**. GPG opcional (depende de la politica del Nexus).
+
+### Parametros de Entrada
+
+| Parametro | Tipo | Requerido | Default | Descripcion |
+|---|---|---|---|---|
+| `java-version` | `string` | no | `'25'` | Version de Java |
+| `nexus-url` | `string` | **si** | — | URL base del Nexus (ej: `https://nexus.example.com`) |
+| `nexus-repository` | `string` | **si** | — | Nombre del repo (ej: `nova-releases`, `nova-snapshots`) |
+| `gpg-key-id` | `string` | no | `''` | Fingerprint GPG (opcional) |
+| `gpg-key` | `string` | no | `''` | Clave GPG (opcional) |
+| `gpg-password` | `string` | no | `''` | Passphrase GPG |
+| `dry-run` | `string` | no | `'false'` | Si es `'true'`, usa `--dry-run` |
+
+### Secretos Requeridos
+
+| Secreto | Descripcion |
+|---|---|
+| `NEXUS_USERNAME` | Nexus username |
+| `NEXUS_PASSWORD` | Nexus password o token |
+
+### Notas
+
+- El `build.gradle.kts` debe tener una `MavenPublication` llamada `nova` con un `maven { url = ... }` repository configurable via `nexus.url` y `nexus.repository` Gradle properties.
+
+---
+
+## 17. reusable-publish-maven-nexus.yml
+
+Igual al #16 pero para proyectos **Maven**. Genera `settings.xml` con la credencial de Nexus.
+
+### Parametros de Entrada
+
+Igual que #16.
+
+### Secretos Requeridos
+
+Igual que #16.
+
+### Notas
+
+- El `pom.xml` debe tener un profile `nexus-publish` con `<distributionManagement>` configurable via `nexus.url` y `nexus.repository` system properties.
 
 ---
 
@@ -509,13 +686,26 @@ jobs:
 
 ## Secretos Necesarios
 
-Cada repositorio de librería debe tener configurados los siguientes secretos:
+Cada repositorio de librería debe tener configurados los siguientes secretos (los marcados como **opcional** solo se requieren si se usa el workflow que los consume):
 
 | Secreto | Usado por | Descripción |
 |---|---|---|
 | `SONAR_TOKEN` | `reusable-sonarcloud-maven.yml` / `reusable-sonarcloud-gradle.yml` | Token de autenticación de SonarCloud |
 | `GH_PAT` | `reusable-version-bump-maven.yml` / `reusable-version-bump-gradle.yml` | Token de acceso personal con permisos de push |
-| `GITHUB_TOKEN` | `reusable-publish-maven.yml` / `reusable-publish-gradle.yml` / `reusable-release-please.yml` | Token automático de GitHub (disponible por defecto) |
+| `GITHUB_TOKEN` | `reusable-publish-maven.yml` / `reusable-publish-gradle.yml` / `reusable-publish-{...}-multi-registry.yml` / `reusable-release-please.yml` | Token automático de GitHub (disponible por defecto) |
+| `MAVEN_USERNAME` *(opcional)* | `reusable-publish-{...}-multi-registry.yml` / `reusable-publish-{...}-maven-central.yml` | Sonatype OSSRH username (requerido para Maven Central) |
+| `MAVEN_TOKEN` *(opcional)* | `reusable-publish-{...}-multi-registry.yml` / `reusable-publish-{...}-maven-central.yml` | Sonatype OSSRH token (requerido para Maven Central) |
+| `NEXUS_USERNAME` *(opcional)* | `reusable-publish-{...}-nexus.yml` | Nexus username (solo para on-premise) |
+| `NEXUS_PASSWORD` *(opcional)* | `reusable-publish-{...}-nexus.yml` | Nexus password o token (solo para on-premise) |
+| `GPG_SIGNING_KEY_ID` *(opcional)* | workflows que publican a Maven Central | Fingerprint de la clave GPG (pasado como input a `nova-setup-gpg`) |
+| `GPG_SIGNING_KEY` *(opcional)* | workflows que publican a Maven Central | Clave privada GPG ASCII-armored |
+| `GPG_SIGNING_PASSWORD` *(opcional)* | workflows que publican a Maven Central | Passphrase de la clave GPG |
+
+### Variables de Repositorio (no secretos)
+
+| Variable | Usado por | Default | Descripción |
+|---|---|---|---|
+| `NOVA_PACKAGE_VISIBILITY` | `reusable-publish-{gradle,maven}.yml` | `'public'` | Visibilidad por defecto del paquete (puede ser sobreescrita por el input `visibility` del workflow) |
 
 ---
 

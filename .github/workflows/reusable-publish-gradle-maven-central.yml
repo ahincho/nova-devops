@@ -1,0 +1,76 @@
+name: Reusable Publish to Maven Central (Gradle)
+description: Publish a Gradle library to Maven Central via Sonatype OSSRH. GPG signing is REQUIRED.
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '25'
+      dry-run:
+        description: 'If true, runs gradle publishDryRun to verify config without publishing'
+        required: false
+        type: string
+        default: 'false'
+      gpg-key-id:
+        description: 'GPG key fingerprint (REQUIRED for Maven Central)'
+        required: true
+        type: string
+      gpg-key:
+        description: 'GPG private key ASCII-armored (REQUIRED for Maven Central)'
+        required: true
+        type: string
+      gpg-password:
+        description: 'GPG passphrase (optional)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+        description: 'Sonatype OSSRH username'
+      MAVEN_TOKEN:
+        required: true
+        description: 'Sonatype OSSRH token'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Nova Setup Java
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@v1
+        with:
+          java-version: ${{ inputs.java-version }}
+          build-tool: gradle
+
+      - name: Nova Setup GPG (REQUIRED)
+        uses: ahincho/nova-devops/.github/actions/nova-setup-gpg@v1
+        with:
+          gpg-signing-key-id: ${{ inputs.gpg-key-id }}
+          gpg-signing-key: ${{ inputs.gpg-key }}
+          gpg-signing-password: ${{ inputs.gpg-password }}
+          fail-on-missing: 'true'
+
+      - name: Publish to Maven Central
+        if: inputs.dry-run != 'true'
+        run: ./gradlew publishMavenCentralPublicationToMavenCentralRepository
+        env:
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
+
+      - name: Dry-run mode
+        if: inputs.dry-run == 'true'
+        run: ./gradlew publishMavenCentralPublicationToMavenCentralRepository --dry-run
+        env:
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
