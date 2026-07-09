@@ -40,6 +40,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
       - name: Validate tag format
         run: |
           if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
