@@ -19,7 +19,9 @@ on:
         type: string
         default: 'false'
     secrets:
-      GITHUB_TOKEN:
+      # Named GH_TOKEN (not GITHUB_TOKEN): GitHub Actions rejects secret names
+      # that collide with reserved system names in workflow_call.secrets.
+      GH_TOKEN:
         required: true
 
 jobs:
@@ -60,4 +62,4 @@ jobs:
           build-tool: maven
           visibility: ${{ inputs.visibility }}
           dry-run: ${{ inputs.dry-run }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}

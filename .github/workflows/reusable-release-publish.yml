@@ -24,7 +24,15 @@ on:
         type: string
         default: 'false'
     secrets:
-      GITHUB_TOKEN:
+      # Named GH_TOKEN (not GITHUB_TOKEN): GitHub Actions rejects secret names
+      # that collide with reserved system names in workflow_call.secrets.
+      # NOTE: this is very likely the real root cause of the "reusable + tag
+      # push" limitation documented in section 11.7 (this workflow could never
+      # be invoked at all, regardless of the trigger, since GITHUB_TOKEN is a
+      # reserved name here) — not a genuine platform limitation as assumed at
+      # the time. Kept unused (publish-on-tag.yml in each repo has the same
+      # logic inlined as a workaround) but fixed here for future reuse.
+      GH_TOKEN:
         required: true
 
 jobs:
@@ -102,11 +110,11 @@ jobs:
         run: ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Dry-run mode (publishToMavenLocal)
         if: inputs.dry-run == 'true'
         run: ./gradlew publishToMavenLocal -Pvisibility=${{ steps.visibility.outputs.value }}
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}

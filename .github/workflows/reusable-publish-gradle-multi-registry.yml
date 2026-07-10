@@ -35,7 +35,9 @@ on:
         type: string
         default: ''
     secrets:
-      GITHUB_TOKEN:
+      # Named GH_TOKEN (not GITHUB_TOKEN): GitHub Actions rejects secret names
+      # that collide with reserved system names in workflow_call.secrets.
+      GH_TOKEN:
         required: true
       MAVEN_USERNAME:
         required: false
@@ -91,7 +93,7 @@ jobs:
         run: ./gradlew publishGithubPublicationToGitHubPackagesRepository
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Publish to Maven Central
         if: inputs.dry-run != 'true' && steps.registries.outputs.maven-central == 'true'
@@ -105,6 +107,6 @@ jobs:
         run: ./gradlew publishDryRun
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
           MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
           MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}

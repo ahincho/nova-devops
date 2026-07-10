@@ -35,7 +35,9 @@ on:
         type: string
         default: ''
     secrets:
-      GITHUB_TOKEN:
+      # Named GH_TOKEN (not GITHUB_TOKEN): GitHub Actions rejects secret names
+      # that collide with reserved system names in workflow_call.secrets.
+      GH_TOKEN:
         required: true
       MAVEN_USERNAME:
         required: false
@@ -99,7 +101,7 @@ jobs:
         run: mvn deploy -DskipTests -Pgithub-publish
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Publish to Maven Central
         if: inputs.dry-run != 'true' && env.MAVEN_USERNAME != ''
