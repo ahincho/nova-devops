@@ -18,20 +18,35 @@ on:
         type: string
     secrets:
       SONAR_TOKEN:
-        description: 'SonarCloud authentication token'
-        required: true
+        description: 'SonarCloud authentication token. If not configured, this workflow skips analysis with a warning instead of failing.'
+        required: false
 
 jobs:
   sonar-analysis:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check SONAR_TOKEN availability
+        id: check-token
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::warning::SONAR_TOKEN secret is not configured for this repo/org. Skipping SonarCloud analysis. Create a project at sonarcloud.io and add the SONAR_TOKEN secret to enable this check."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
+        if: steps.check-token.outputs.skip == 'false'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Java
+        if: steps.check-token.outputs.skip == 'false'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -39,9 +54,11 @@ jobs:
           cache: 'maven'
 
       - name: Generate JaCoCo Report
+        if: steps.check-token.outputs.skip == 'false'
         run: mvn verify jacoco:report
 
       - name: SonarCloud Analysis
+        if: steps.check-token.outputs.skip == 'false'
         run: >
           mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
           -Dsonar.organization=${{ inputs.sonar-org }}
