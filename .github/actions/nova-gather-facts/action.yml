@@ -64,7 +64,17 @@ runs:
         case "${{ inputs.version-source }}" in
           file|gradle-properties)
             if [ -f "${{ inputs.version-file }}" ]; then
-              VERSION=$(grep '^version' "${{ inputs.version-file }}" | sed 's/version[ ]*=[ ]*//' | sed 's/^["'\'']//;s/["'\'']$//' | head -1)
+              case "${{ inputs.version-file }}" in
+                *.xml)
+                  # Maven pom.xml: <version>X</version> (XML, not key=value).
+                  # Takes the first occurrence, which is either the project's
+                  # own <version> or (if absent, inherited) its <parent><version>.
+                  VERSION=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' "${{ inputs.version-file }}" | head -1)
+                  ;;
+                *)
+                  VERSION=$(grep '^version' "${{ inputs.version-file }}" | sed 's/version[ ]*=[ ]*//' | sed 's/^["'\'']//;s/["'\'']$//' | head -1)
+                  ;;
+              esac
             fi
             ;;
           env)
