@@ -62,6 +62,8 @@ jobs:
         with:
           registry: github-packages
           build-tool: gradle
-          visibility: ${{ inputs.visibility }}
+          # vars is only readable at workflow level; resolved here before
+          # being passed as a plain input into the composite action.
+          visibility: ${{ inputs.visibility != '' && inputs.visibility || vars.NOVA_PACKAGE_VISIBILITY }}
           dry-run: ${{ inputs.dry-run }}
           github-token: ${{ secrets.GH_TOKEN }}

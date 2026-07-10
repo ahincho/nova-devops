@@ -5,7 +5,7 @@ inputs:
     description: 'Target registry (github-packages | maven-central | nexus | sonatype-staging)'
     required: true
   visibility:
-    description: 'Package visibility (public | private). Defaults to vars.NOVA_PACKAGE_VISIBILITY if set, otherwise "public".'
+    description: 'Package visibility (public | private). Defaults to "public" if empty. Callers that want the vars.NOVA_PACKAGE_VISIBILITY fallback must resolve it themselves before calling this action (composite actions cannot read the vars context).'
     required: false
     default: ''
   build-tool:
@@ -64,18 +64,19 @@ runs:
       id: visibility
       shell: bash
       env:
+        # Composite actions cannot read the `vars` context directly (it is only
+        # available to workflow-level jobs/steps). Callers that want the
+        # vars.NOVA_PACKAGE_VISIBILITY fallback must resolve it themselves and
+        # pass the result via the `visibility` input.
         INPUT_VISIBILITY: ${{ inputs.visibility }}
-        VAR_VISIBILITY: ${{ vars.NOVA_PACKAGE_VISIBILITY }}
       run: |
         if [ -n "${INPUT_VISIBILITY}" ]; then
           EFFECTIVE="${INPUT_VISIBILITY}"
-        elif [ -n "${VAR_VISIBILITY}" ]; then
-          EFFECTIVE="${VAR_VISIBILITY}"
         else
           EFFECTIVE="public"
         fi
         echo "value=${EFFECTIVE}" >> "$GITHUB_OUTPUT"
-        echo "Effective visibility: ${EFFECTIVE} (input=${INPUT_VISIBILITY}, var=${VAR_VISIBILITY})"
+        echo "Effective visibility: ${EFFECTIVE} (input=${INPUT_VISIBILITY})"
 
     - name: Validate visibility against repo visibility
       shell: bash

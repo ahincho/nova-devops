@@ -19,14 +19,22 @@ Resolves effective visibility (input > env var > default `public`), validates ag
 |---|---|---|---|
 | `registry` | ✅ | — | `github-packages` / `maven-central` / `nexus` / `sonatype-staging` |
 | `build-tool` | ✅ | — | `maven` / `gradle` |
-| `visibility` | ❌ | `''` (uses var or default) | `public` / `private` |
+| `visibility` | ❌ | `''` (defaults to `public`) | `public` / `private` |
 | `java-version` | ❌ | `25` | Java version (informational) |
 | `dry-run` | ❌ | `false` | If true, only print commands |
 
 ## Visibility resolution
 
 ```
-input.visibility  >  vars.NOVA_PACKAGE_VISIBILITY  >  "public"
+input.visibility  >  "public"
+```
+
+Composite actions cannot read the `vars` context directly. Callers that want
+the `vars.NOVA_PACKAGE_VISIBILITY` fallback must resolve it themselves at the
+workflow level and pass the result via the `visibility` input, e.g.:
+
+```yaml
+visibility: ${{ inputs.visibility != '' && inputs.visibility || vars.NOVA_PACKAGE_VISIBILITY }}
 ```
 
 Validated against `github.event.repository.visibility`:
