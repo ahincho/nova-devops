@@ -14,4 +14,8 @@ jobs:
   release-please:
     uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@main
     secrets:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOVA_RELEASE_PAT is a Personal Access Token (contents:write + pull-requests:write).
+      # GITHUB_TOKEN cannot be used here because GitHub does not trigger new workflow
+      # runs (e.g. tag-triggered workflows) for tags/pushes made with the automatic
+      # token. Falls back to GITHUB_TOKEN if the PAT is not yet configured.
+      GH_TOKEN: ${{ secrets.NOVA_RELEASE_PAT || secrets.GITHUB_TOKEN }}
