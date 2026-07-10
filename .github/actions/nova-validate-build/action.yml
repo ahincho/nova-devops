@@ -67,7 +67,7 @@ runs:
       shell: bash
       run: |
         if [ -f "gradle.properties" ]; then
-          if ! grep -q "^group" gradle.properties && ! grep -q "^groupId" build.gradle*" 2>/dev/null; then
+          if ! grep -q "^group" gradle.properties && ! grep -lq "groupId" build.gradle* 2>/dev/null; then
             echo "::warning::No 'group' defined in gradle.properties or 'groupId' in build.gradle*"
           fi
           if ! grep -q "^version" gradle.properties; then
