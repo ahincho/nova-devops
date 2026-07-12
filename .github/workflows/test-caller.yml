@@ -1,9 +1,0 @@
-name: TEST Caller (delete me)
-
-on:
-  workflow_dispatch:
-
-jobs:
-  call:
-    uses: ahincho/nova-devops/.github/workflows/test-reusable-target.yml@main
-    secrets: inherit
