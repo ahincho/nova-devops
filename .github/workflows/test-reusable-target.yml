@@ -1,0 +1,22 @@
+name: TEST Reusable Target (delete me)
+
+on:
+  workflow_call:
+    secrets:
+      test-hyphen-check:
+        description: 'test'
+        required: false
+
+jobs:
+  print:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print secret presence
+        env:
+          VAL: ${{ secrets.test-hyphen-check }}
+        run: |
+          if [ -n "${VAL}" ]; then
+            echo "HYPHEN_ACCESS_RESULT=NON-EMPTY (value length: ${#VAL})"
+          else
+            echo "HYPHEN_ACCESS_RESULT=EMPTY"
+          fi
