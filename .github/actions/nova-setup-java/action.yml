@@ -54,6 +54,13 @@ runs:
         GITHUB_ACTOR: ${{ github.actor }}
         EFFECTIVE_TOKEN: ${{ inputs.packages-read-token != '' && inputs.packages-read-token || github.token }}
       run: |
+        # NOTE: Maven requires repositories.repository.id to be unique within a
+        # POM, so a single shared server id cannot back >1 repository URL (a
+        # pom.xml importing from 2+ different Nova repos, e.g. nova-bom AND
+        # nova-java-spring-boot-starter, needs 2 distinct ids). All entries
+        # below share the SAME credentials - add a new <server> here whenever
+        # a Maven consumer needs to read from another Nova repo for the first
+        # time, then reference that id from the consumer's <repositories>.
         mkdir -p ~/.m2
         cat > ~/.m2/settings.xml <<EOF
         <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
@@ -62,11 +69,16 @@ runs:
                                       https://maven.apache.org/xsd/settings-1.0.0.xsd">
           <servers>
             <server>
-              <id>nova-packages-read</id>
+              <id>nova-packages-read-bom</id>
+              <username>${GITHUB_ACTOR}</username>
+              <password>${EFFECTIVE_TOKEN}</password>
+            </server>
+            <server>
+              <id>nova-packages-read-starter</id>
               <username>${GITHUB_ACTOR}</username>
               <password>${EFFECTIVE_TOKEN}</password>
             </server>
           </servers>
         </settings>
         EOF
-        echo "Maven settings.xml configured with nova-packages-read server."
+        echo "Maven settings.xml configured with nova-packages-read-* servers."
