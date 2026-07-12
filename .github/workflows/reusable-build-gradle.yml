@@ -41,7 +41,16 @@ jobs:
         run: ./gradlew build
 
       - name: Lint - Checkstyle
-        run: ./gradlew checkstyleMain checkstyleTest
+        # Only lint production code (checkstyleMain), matching the `checkstyle {
+        # sourceSets = [main] }` convention every Nova repo configures in its
+        # build.gradle.kts. Test suites legitimately rely on static-import
+        # wildcards (Assertions.*, jqwik.api.*) that AvoidStarImport/UnusedImports
+        # would otherwise flag. Explicitly running checkstyleTest here bypassed
+        # that per-repo opt-out, since the Gradle Checkstyle plugin always
+        # creates the checkstyleTest task regardless of the sourceSets property
+        # (that property only controls the `check` lifecycle wiring, not task
+        # existence). See docs/java/06-semantic-versioning-en-java.md §11.9.30.
+        run: ./gradlew checkstyleMain
 
       - name: Generate JavaDoc
         run: ./gradlew javadoc
