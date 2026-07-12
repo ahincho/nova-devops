@@ -57,12 +57,16 @@ jobs:
         if: inputs.build-tool == 'gradle'
         run: |
           # CycloneDX Gradle plugin must be applied in the project's build.gradle.kts:
-          #   plugins { id("org.cyclonedx.bom") version "1.10.0" }
-          # If the plugin is not applied, this step will fail gracefully.
+          #   plugins { id("org.cyclonedx.bom") version "3.2.4" }
+          # NOTE: v2.x+ of this plugin configures output via a typed `tasks.cyclonedxBom { }`
+          # extension block (jsonOutput/xmlOutput Property<RegularFile>), NOT via '-P' command-line
+          # properties (there is no project.findProperty() reading in the plugin). With zero extra
+          # config the task writes BOTH build/reports/cyclonedx/bom.json and bom.xml by default,
+          # which is why no '-P' flags are passed here - the "Locate SBOM file" step below already
+          # searches that default path for whichever format was requested.
+          # If the plugin is not applied at all, fall back to syft.
           if ./gradlew tasks --all 2>/dev/null | grep -q "cyclonedxBom"; then
-            ./gradlew cyclonedxBom \
-              -Pcyclonedx.outputFormat=${{ inputs.sbom-format }} \
-              -Pcyclonedx.outputName=bom
+            ./gradlew cyclonedxBom
           else
             echo "::warning::CycloneDX Gradle plugin not applied. Falling back to syft."
             # Fallback: use syft (container-aware, doesn't need plugin in build)
