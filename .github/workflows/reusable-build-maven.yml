@@ -8,6 +8,14 @@ on:
         required: false
         type: string
         default: '25'
+    secrets:
+      NOVA_PACKAGES_READ_TOKEN:
+        description: >-
+          Token with read:packages scope, used to resolve pe.edu.nova.java
+          dependencies published from OTHER Nova repos (e.g. nova-bom).
+          Optional; without it, cross-repo GitHub Packages reads get a 401
+          (GITHUB_TOKEN cannot read packages from a different repo).
+        required: false
 
 jobs:
   build:
@@ -22,6 +30,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: maven
+          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
 
       - name: Nova Validate Build
         uses: ahincho/nova-devops/.github/actions/nova-validate-build@main

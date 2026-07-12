@@ -28,6 +28,13 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      NOVA_PACKAGES_READ_TOKEN:
+        description: >-
+          Token with read:packages scope, used to resolve pe.edu.nova.java
+          dependencies published from OTHER Nova repos (Maven only). Optional;
+          without it, cross-repo GitHub Packages reads get a 401.
+        required: false
 
 jobs:
   sbom:
@@ -48,6 +55,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
+          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
 
       - name: Nova Gather Facts
         id: facts

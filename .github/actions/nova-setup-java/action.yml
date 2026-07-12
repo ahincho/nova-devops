@@ -13,6 +13,16 @@ inputs:
     description: 'JDK distribution'
     required: false
     default: 'temurin'
+  packages-read-token:
+    description: >-
+      Token for reading GitHub Packages published by OTHER Nova repos
+      (Maven only - Gradle repos configure cross-repo read credentials
+      directly in their build.gradle.kts). Pass secrets.NOVA_PACKAGES_READ_TOKEN
+      from the caller. Falls back to github.token if empty, which works for
+      same-repo reads but NOT cross-repo ones (GITHUB_TOKEN cannot read
+      packages from a different repo - see docs/java/06-semantic-versioning-en-java.md §11.9.30).
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
@@ -36,3 +46,27 @@ runs:
       uses: gradle/actions/setup-gradle@v4
       with:
         cache-read-only: ${{ github.event_name != 'push' }}
+
+    - name: Configure Maven settings.xml for cross-repo package reads (if maven)
+      if: inputs.build-tool == 'maven'
+      shell: bash
+      env:
+        GITHUB_ACTOR: ${{ github.actor }}
+        EFFECTIVE_TOKEN: ${{ inputs.packages-read-token != '' && inputs.packages-read-token || github.token }}
+      run: |
+        mkdir -p ~/.m2
+        cat > ~/.m2/settings.xml <<EOF
+        <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                                      https://maven.apache.org/xsd/settings-1.0.0.xsd">
+          <servers>
+            <server>
+              <id>nova-packages-read</id>
+              <username>${GITHUB_ACTOR}</username>
+              <password>${EFFECTIVE_TOKEN}</password>
+            </server>
+          </servers>
+        </settings>
+        EOF
+        echo "Maven settings.xml configured with nova-packages-read server."
