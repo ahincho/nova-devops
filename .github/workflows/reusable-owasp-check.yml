@@ -29,7 +29,7 @@ on:
         type: boolean
         default: true
     secrets:
-      nvd-api-key:
+      NVD_API_KEY:
         description: 'NVD API Key (https://nvd.nist.gov/developers/request-an-api-key). Optional but highly recommended - without it, NVD data updates are extremely slow and rate-limited.'
         required: false
 
@@ -71,7 +71,7 @@ jobs:
         # once NVD_API_KEY is set (NOVA-SEMVER-20) to restore the CVSS-threshold as a real gate.
         continue-on-error: true
         env:
-          NVD_API_KEY: ${{ secrets.nvd-api-key }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           NOVA_OWASP_FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
           NOVA_OWASP_SUPPRESSION_FILE: ${{ inputs.suppression-file }}
         run: |
@@ -90,7 +90,7 @@ jobs:
         # TEMPORARY: see comment on the Gradle step above.
         continue-on-error: true
         env:
-          NVD_API_KEY: ${{ secrets.nvd-api-key }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           ARGS="-DfailBuildOnCVSS=${{ inputs.fail-on-cvss }}"
           if [ -n "${{ inputs.suppression-file }}" ]; then
