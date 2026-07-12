@@ -5,5 +5,5 @@ on:
 
 jobs:
   call:
-    uses: ahincho/nova-devops/.github/workflows/test-reusable-target.yml@test/secrets-hyphen-check
+    uses: ahincho/nova-devops/.github/workflows/test-reusable-target.yml@main
     secrets: inherit
