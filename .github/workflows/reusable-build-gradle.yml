@@ -8,6 +8,13 @@ on:
         required: false
         type: string
         default: '25'
+    secrets:
+      NOVA_PACKAGES_READ_TOKEN:
+        description: >-
+          Token with read:packages scope, used to resolve pe.edu.nova.java
+          dependencies published from OTHER Nova repos. Optional; falls back
+          to NOVA_RELEASE_PAT (already proven to have this scope) if unset.
+        required: false
 
 jobs:
   build:
@@ -38,6 +45,16 @@ jobs:
           version-source: gradle-properties
 
       - name: Build and Test
+        env:
+          # Falls back to NOVA_RELEASE_PAT (already proven to have packages:read,
+          # see docs/java/06-semantic-versioning-en-java.md §11.9.17) so cross-repo
+          # consumers (observability-spring-boot-starter, spring-boot-starter,
+          # commons-spring-boot-starter) don't need a brand-new dedicated secret.
+          # This env var was missing entirely from this step until now (§11.9.30
+          # bug B) - build.gradle.kts reads it via System.getenv(), but nothing
+          # ever set it, so it silently fell through to GITHUB_TOKEN, which
+          # cannot read packages from a different repo.
+          NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
         run: ./gradlew build
 
       - name: Lint - Checkstyle

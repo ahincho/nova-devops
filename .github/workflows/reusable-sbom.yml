@@ -55,7 +55,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
-          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
+          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
 
       - name: Nova Gather Facts
         id: facts
@@ -63,6 +63,8 @@ jobs:
 
       - name: Generate SBOM (Gradle - CycloneDX plugin)
         if: inputs.build-tool == 'gradle'
+        env:
+          NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
         run: |
           # CycloneDX Gradle plugin must be applied in the project's build.gradle.kts:
           #   plugins { id("org.cyclonedx.bom") version "3.2.4" }

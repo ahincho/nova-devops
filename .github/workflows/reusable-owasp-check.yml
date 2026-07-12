@@ -56,7 +56,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
-          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
+          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
 
       - name: Nova Gather Facts
         id: facts
@@ -81,6 +81,10 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           NOVA_OWASP_FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
           NOVA_OWASP_SUPPRESSION_FILE: ${{ inputs.suppression-file }}
+          # Falls back to NOVA_RELEASE_PAT (already proven to have packages:read,
+          # see docs/java/06-semantic-versioning-en-java.md §11.9.17) so consumers
+          # don't need a brand-new dedicated secret just for this.
+          NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
         run: |
           # NOTE: the org.owasp.dependencycheck Gradle plugin does NOT read '-P'
           # command-line properties (verified against its source: DependencyCheckPlugin.groovy

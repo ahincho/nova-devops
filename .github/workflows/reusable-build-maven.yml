@@ -30,7 +30,7 @@ jobs:
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: maven
-          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
+          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
 
       - name: Nova Validate Build
         uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
