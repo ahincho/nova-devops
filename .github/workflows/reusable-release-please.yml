@@ -8,11 +8,11 @@ on:
         required: false
         type: string
         default: 'java'
-      package-name:
-        description: 'Package name (defaults to repository name if empty)'
+      path:
+        description: 'Filesystem path inside the repo where .release-please-config.json lives (default: repo root)'
         required: false
         type: string
-        default: ''
+        default: '.'
       config-file:
         description: 'Path to release-please config file'
         required: false
@@ -52,23 +52,17 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
 
-      - name: Resolve package name
-        id: resolve-name
-        shell: bash
-        run: |
-          PKG_NAME="${{ inputs.package-name }}"
-          if [ -z "${PKG_NAME}" ]; then
-            PKG_NAME="${{ github.event.repository.name }}"
-          fi
-          echo "package-name=${PKG_NAME}" >> "$GITHUB_OUTPUT"
-          echo "Using package name: ${PKG_NAME}"
+      # NOTE: package-name is no longer a valid input of release-please-action@v4
+      # (renamed/moved to $.packages[path].package-name in the config file).
+      # Each consumer repo already declares it correctly in its
+      # .release-please-config.json, so release-please reads it from there.
 
       - name: Run release-please
         uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GH_TOKEN }}
           release-type: ${{ inputs.release-type }}
-          package-name: ${{ steps.resolve-name.outputs.package-name }}
+          path: ${{ inputs.path }}
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
           target-branch: ${{ inputs.target-branch }}
