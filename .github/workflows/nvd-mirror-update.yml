@@ -46,8 +46,12 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.2'
+        # Deliberately no `gradle-version` - the runner ships Gradle 9.6.1
+        # preinstalled (verified via runner logs) and the OWASP plugin 12.2.2
+        # is compatible with any Gradle 8+. Pinning a specific version triggers
+        # a fresh download from gradle's distribution catalog that can fail
+        # on catalog drift (observed 2026-07-13: pinning to '9.2' fails with
+        # "Gradle version 9.2 does not exist").
 
       - name: Restore yesterday's mirror (so today only fetches the delta)
         id: restore
