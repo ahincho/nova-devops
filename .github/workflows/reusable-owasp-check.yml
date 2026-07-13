@@ -72,11 +72,8 @@ jobs:
 
       - name: Run OWASP Dependency Check (Gradle)
         if: inputs.build-tool == 'gradle'
-        # TEMPORARY: continue-on-error until NVD_API_KEY org secret is configured everywhere.
-        # Without a key, GitHub-hosted runners commonly hit NVD's 429 (rate limit) on the very
-        # first (cold-cache) run, which would otherwise fail this job platform-wide. Remove this
-        # once NVD_API_KEY is set (NOVA-SEMVER-20) to restore the CVSS-threshold as a real gate.
-        continue-on-error: true
+        # NVD_API_KEY is configured per-repo (12/12 repos as of 2026-07-12).
+        # Failures here are real CVSS-threshold breaches and should block the build.
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           NOVA_OWASP_FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
@@ -98,8 +95,8 @@ jobs:
 
       - name: Run OWASP Dependency Check (Maven)
         if: inputs.build-tool == 'maven'
-        # TEMPORARY: see comment on the Gradle step above.
-        continue-on-error: true
+        # NVD_API_KEY is configured per-repo (12/12 repos as of 2026-07-12).
+        # Failures here are real CVSS-threshold breaches and should block the build.
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
