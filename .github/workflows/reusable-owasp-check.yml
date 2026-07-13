@@ -23,6 +23,22 @@ on:
         required: false
         type: string
         default: ''
+      analyzer-override:
+        description: >-
+          Comma-separated OWASP analyzers to RE-ENABLE on top of the default-off set.
+          Use when a repo bundles other ecosystems (npm frontend, native C/C++ source,
+          gradle plugin processing Go code, etc.) where disabling the corresponding
+          analyzer would hide real signal. Allowed values: nuspec, nugetconf, msbuild,
+          golang|go|golangdep, golangmod|gomod, gogradle, swift, cocoapods, carthage,
+          composer, cpanfile|perl, cmake, autoconf, bundle|ruby|bundler, pydistribution,
+          pypackage|pip, pipenv, poetry, pyinstall, setuptools, rubygems, dart|pub,
+          assembly, retirejs, clang, haskell|stack, mix|elixir, rebar|erlang,
+          cargo|rust, yarn, pnpm, npm|node. Empty = default (all default-off analyzers
+          stay disabled). Precedence: this input > repo variable
+          DEPENDENCY_CHECK_ANALYZERS (Settings > Secrets and variables > Variables).
+        required: false
+        type: string
+        default: ''
       upload-report:
         description: 'Upload HTML report as artifact'
         required: false
@@ -123,6 +139,12 @@ jobs:
           # see docs/java/06-semantic-versioning-en-java.md §11.9.17) so consumers
           # don't need a brand-new dedicated secret just for this.
           NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          # Analyzer override contract for Gradle consumers: the consumer's
+          # build.gradle.kts reads this via System.getenv("NOVA_OWASP_ANALYZER_OVERRIDE")
+          # and re-enables the listed analyzers on top of its default-off set.
+          # The Gradle plugin does NOT consume -P properties (see run-step comment),
+          # so an env var is the only way to pass a per-call override here.
+          NOVA_OWASP_ANALYZER_OVERRIDE: ${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || '' }}
         run: |
           # NOTE: the org.owasp.dependencycheck Gradle plugin does NOT read '-P'
           # command-line properties (verified against its source: DependencyCheckPlugin.groovy
@@ -192,6 +214,58 @@ jobs:
           ARGS="${ARGS} -DpyPackageAnalyzerEnabled=false"
           ARGS="${ARGS} -DrubygemsAnalyzerEnabled=false"
           ARGS="${ARGS} -DdartAnalyzerEnabled=false"
+          # Apply analyzer override (re-enables default-off analyzers on top of the
+          # explicit -D<name>...=false lines above). Last -D wins for the same property
+          # in Maven, so a true override here flips the default back to enabled.
+          # Allowed tokens: nuspec, nugetconf, msbuild, golang|go|golangdep,
+          # golangmod|gomod, gogradle, swift, cocoapods, carthage, composer,
+          # cpanfile|perl, cmake, autoconf, bundle|ruby|bundler, pydistribution,
+          # pypackage|pip, pipenv, poetry, pyinstall, setuptools, rubygems, dart|pub,
+          # assembly, retirejs, clang, haskell|stack, mix|elixir, rebar|erlang,
+          # cargo|rust, yarn, pnpm, npm|node. Unknown tokens are silently ignored.
+          OVERRIDE_RAW="${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || '' }}"
+          if [ -n "${OVERRIDE_RAW}" ]; then
+            echo "Analyzer override applied: ${OVERRIDE_RAW}"
+            IFS=',' read -ra OVERRIDE <<< "${OVERRIDE_RAW}"
+            for tok in "${OVERRIDE[@]}"; do
+              tok="$(echo "${tok}" | tr '[:upper:]' '[:lower:]' | xargs)"
+              case "${tok}" in
+                nuspec) ARGS="${ARGS} -DnuspecAnalyzerEnabled=true" ;;
+                nugetconf) ARGS="${ARGS} -DnugetconfAnalyzerEnabled=true" ;;
+                msbuild) ARGS="${ARGS} -DmsbuildAnalyzerEnabled=true" ;;
+                golang|go|golangdep) ARGS="${ARGS} -DgolangDepEnabled=true" ;;
+                golangmod|gomod) ARGS="${ARGS} -DgolangModEnabled=true" ;;
+                gogradle) ARGS="${ARGS} -DgoGradleAnalyzerEnabled=true" ;;
+                swift) ARGS="${ARGS} -DswiftPackageManagerAnalyzerEnabled=true -DswiftPackageResolvedAnalyzerEnabled=true" ;;
+                cocoapods) ARGS="${ARGS} -DcocoapodsAnalyzerEnabled=true" ;;
+                carthage) ARGS="${ARGS} -DcarthageAnalyzerEnabled=true" ;;
+                composer) ARGS="${ARGS} -DcomposerAnalyzerEnabled=true" ;;
+                cpanfile|perl) ARGS="${ARGS} -DcpanfileAnalyzerEnabled=true" ;;
+                cmake) ARGS="${ARGS} -DcmakeAnalyzerEnabled=true" ;;
+                autoconf) ARGS="${ARGS} -DautoconfAnalyzerEnabled=true" ;;
+                bundle|ruby|bundler) ARGS="${ARGS} -DbundleAuditAnalyzerEnabled=true" ;;
+                pydistribution) ARGS="${ARGS} -DpyDistributionAnalyzerEnabled=true" ;;
+                pypackage|pip) ARGS="${ARGS} -DpyPackageAnalyzerEnabled=true" ;;
+                pipenv) ARGS="${ARGS} -DpipenvAnalyzerEnabled=true" ;;
+                poetry) ARGS="${ARGS} -DpoetryAnalyzerEnabled=true" ;;
+                pyinstall) ARGS="${ARGS} -DpyInstallAnalyzerEnabled=true" ;;
+                setuptools) ARGS="${ARGS} -DsetuptoolsAnalyzerEnabled=true" ;;
+                rubygems) ARGS="${ARGS} -DrubygemsAnalyzerEnabled=true" ;;
+                dart|pub) ARGS="${ARGS} -DdartAnalyzerEnabled=true" ;;
+                assembly) ARGS="${ARGS} -DassemblyAnalyzerEnabled=true" ;;
+                retirejs) ARGS="${ARGS} -DretireJsAnalyzerEnabled=true" ;;
+                clang) ARGS="${ARGS} -DclangAnalyzerEnabled=true" ;;
+                haskell|stack) ARGS="${ARGS} -DhaskellStackAnalyzerEnabled=true" ;;
+                mix|elixir) ARGS="${ARGS} -DmixAuditAnalyzerEnabled=true" ;;
+                rebar|erlang) ARGS="${ARGS} -DrebarAnalyzerEnabled=true" ;;
+                cargo|rust) ARGS="${ARGS} -DcargoAnalyzerEnabled=true" ;;
+                yarn) ARGS="${ARGS} -DyarnAnalyzerEnabled=true" ;;
+                pnpm) ARGS="${ARGS} -DpnpmAnalyzerEnabled=true" ;;
+                npm|node) ARGS="${ARGS} -DnodeAnalyzerEnabled=true -DnodeAuditEnabled=true" ;;
+                *) echo "::warning::Unknown analyzer override token ignored: '${tok}'" ;;
+              esac
+            done
+          fi
           if [ -n "${{ inputs.suppression-file }}" ]; then
             ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }}"
           fi
@@ -221,4 +295,5 @@ jobs:
           echo "| Fail on CVSS >= | ${{ inputs.fail-on-cvss }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Build tool | ${{ inputs.build-tool }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Suppression file | ${{ inputs.suppression-file || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Analyzer override | ${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || 'none (all default-off analyzers disabled)' }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | ${{ steps.facts.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
