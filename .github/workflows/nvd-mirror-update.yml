@@ -1,0 +1,111 @@
+name: NVD Mirror Update
+
+description: |
+  Builds/refreshes ONE shared OWASP dependency-check NVD database (H2 +
+  Lucene index) and publishes it as a GitHub Release asset on this repo.
+  Every Nova Java repo's reusable-owasp-check.yml downloads this asset
+  read-only instead of each of the 12 repos syncing the full ~365k-record
+  NVD dataset independently on every PR.
+  See docs/java/06-semantic-versioning-en-java.md for the investigation
+  that led to this (OWASP scans were taking 30-50+ min per PR because the
+  local GitHub Actions cache is scoped per-branch/PR and was never shared,
+  forcing a full cold NVD sync on every new branch).
+  Runs once a day; subsequent runs are fast because they restore
+  yesterday's mirror first and only fetch the small "modified" delta.
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update-nvd-mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      MIRROR_TAG: nvd-mirror
+      MIRROR_ASSET: dependency-check-data.zip
+      DATA_DIR: ${{ github.workspace }}/nvd-data
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Deliberately NOT using nova-setup-java here: that composite action
+      # requires a gradle.properties/pom.xml at the repo root (it validates
+      # a "Nova library" layout), which doesn't apply to this standalone
+      # updater project living under .github/nvd-updater.
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.2'
+
+      - name: Restore yesterday's mirror (so today only fetches the delta)
+        id: restore
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${DATA_DIR}"
+          if gh release download "${MIRROR_TAG}" \
+              --repo "${{ github.repository }}" \
+              --pattern "${MIRROR_ASSET}" \
+              --dir /tmp --clobber; then
+            unzip -q "/tmp/${MIRROR_ASSET}" -d "${DATA_DIR}"
+            echo "Restored previous mirror - expecting a fast incremental update."
+          else
+            echo "::warning::No previous mirror release found (first run?). This update will do a full cold NVD sync (~30-50 min)."
+          fi
+
+      - name: Update NVD database (update-only, no analysis)
+        working-directory: .github/nvd-updater
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          NVD_DATA_DIRECTORY: ${{ env.DATA_DIR }}
+        run: |
+          if [ -z "${NVD_API_KEY}" ]; then
+            echo "::warning::No NVD_API_KEY configured on nova-devops. Add one (Settings > Secrets > Actions) - see https://nvd.nist.gov/developers/request-an-api-key"
+          fi
+          gradle dependencyCheckUpdate --info
+
+      - name: Package data directory
+        run: |
+          cd "${DATA_DIR}"
+          zip -qr "${GITHUB_WORKSPACE}/${MIRROR_ASSET}" .
+          cd "${GITHUB_WORKSPACE}"
+          ls -lh "${MIRROR_ASSET}"
+
+      - name: Publish/refresh mirror release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${MIRROR_TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${MIRROR_TAG}" "${MIRROR_ASSET}" \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "${MIRROR_TAG}" "${MIRROR_ASSET}" \
+              --repo "${{ github.repository }}" \
+              --title "NVD dependency-check data mirror (auto-updated daily)" \
+              --notes "Not a software release - internal artifact. Shared, read-only OWASP dependency-check NVD database consumed by reusable-owasp-check.yml across all Nova Java repos. Rebuilt daily by this workflow." \
+              --latest=false
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## NVD Mirror Update" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Setting | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Restored previous mirror | ${{ steps.restore.outcome == 'success' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Data directory size | $(du -sh "${DATA_DIR}" 2>/dev/null | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Asset size | $(du -sh "${MIRROR_ASSET}" 2>/dev/null | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
