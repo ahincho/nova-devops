@@ -156,6 +156,42 @@ jobs:
           # creates it on demand.
           mkdir -p "${HOME}/.dependency-check-data"
           ARGS="${ARGS} -DdataDirectory=${HOME}/.dependency-check-data"
+          # Investigation (2026-07-13, docs/java/06-semantic-versioning-en-java.md):
+          # a cold NVD sync took 50+ min mostly due to cache scoping, NOT these
+          # analyzers - but disabling ecosystems that plainly do not exist in
+          # any Nova Maven repo removes real (if smaller) analyze-phase
+          # overhead and network surface at zero detection-feature cost.
+          # Property names verified against the actually-installed plugin via
+          # `mvn help:describe -Dplugin=org.owasp:dependency-check-maven:12.2.2
+          # -Dgoal=check -Ddetail=true` - Maven's analyzer set has DIVERGED
+          # from the Gradle plugin's even at the same version number (e.g.
+          # carthageAnalyzerEnabled still exists here, Gradle 12.2.2 dropped it).
+          # Deliberately NOT disabled: node/nodeAudit analyzers (every Nova
+          # repo has a real package.json for commitlint/lefthook) and
+          # opensslAnalyzerEnabled (harmless/fast). This is centralized here,
+          # not per-repo pom.xml, because all 3 Maven repos invoke the plugin
+          # via its bare coordinates with zero <build><plugins> declaration -
+          # command-line -D properties are the ONLY configuration surface.
+          ARGS="${ARGS} -DretireJsAnalyzerEnabled=false"
+          ARGS="${ARGS} -DassemblyAnalyzerEnabled=false"
+          ARGS="${ARGS} -DnuspecAnalyzerEnabled=false"
+          ARGS="${ARGS} -DnugetconfAnalyzerEnabled=false"
+          ARGS="${ARGS} -DmsbuildAnalyzerEnabled=false"
+          ARGS="${ARGS} -DgolangDepEnabled=false"
+          ARGS="${ARGS} -DgolangModEnabled=false"
+          ARGS="${ARGS} -DswiftPackageManagerAnalyzerEnabled=false"
+          ARGS="${ARGS} -DswiftPackageResolvedAnalyzerEnabled=false"
+          ARGS="${ARGS} -DcocoapodsAnalyzerEnabled=false"
+          ARGS="${ARGS} -DcarthageAnalyzerEnabled=false"
+          ARGS="${ARGS} -DcomposerAnalyzerEnabled=false"
+          ARGS="${ARGS} -DcpanfileAnalyzerEnabled=false"
+          ARGS="${ARGS} -DcmakeAnalyzerEnabled=false"
+          ARGS="${ARGS} -DautoconfAnalyzerEnabled=false"
+          ARGS="${ARGS} -DbundleAuditAnalyzerEnabled=false"
+          ARGS="${ARGS} -DpyDistributionAnalyzerEnabled=false"
+          ARGS="${ARGS} -DpyPackageAnalyzerEnabled=false"
+          ARGS="${ARGS} -DrubygemsAnalyzerEnabled=false"
+          ARGS="${ARGS} -DdartAnalyzerEnabled=false"
           if [ -n "${{ inputs.suppression-file }}" ]; then
             ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }}"
           fi
