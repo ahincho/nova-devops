@@ -145,7 +145,13 @@ jobs:
               verified_date=$(echo "$entry" | jq -r '.verified_date')
               echo "  <suppress>"
               echo "    <notes><![CDATA[$reason (documented FP, verified by $verified_by on $verified_date)]]></notes>"
-              echo "    <packageUrl>pkg:$pmgr/$pkg@*</packageUrl>"
+              # The dependency-check packageUrl matcher is EXACT by default - the
+              # `@*` token was treated as a literal asterisk and produced "zero
+              # matches" in CI run 29278748111. We use regex="true" with `@.*` to
+              # match any version of the artifact. The . in groupId is escaped
+              # to avoid matching unintended artifacts (e.g. "kotlinx" would
+              # otherwise match "kotlin.*").
+              echo "    <packageUrl regex=\"true\">pkg:$pmgr/$(echo "$pkg" | sed 's/\./\\./g')@.*</packageUrl>"
               echo "    <cve>$cve</cve>"
               echo "  </suppress>"
               APPLIED=$((APPLIED + 1))
