@@ -39,6 +39,19 @@ on:
         required: false
         type: string
         default: ''
+      cve-suppressions:
+        description: >-
+          Comma-separated list of CVE IDs to suppress as documented false positives.
+          Each CVE must exist in nova-devops/docs/owasp-suppressions.json with
+          status="active". Unknown CVEs emit a warning and are skipped. Precedence:
+          this input > repo variable NOVA_OWASP_CVE_SUPPRESSIONS (Settings > Secrets
+          and variables > Variables). Empty = no suppressions. The generated
+          suppressions.xml is exposed to consumers via the NOVA_OWASP_SUPPRESSIONS_FILE
+          env var (Gradle) and via -DsuppressionFiles (Maven) - the consumer's
+          build.gradle.kts must read the env var to opt in (default consumers ignore it).
+        required: false
+        type: string
+        default: ''
       upload-report:
         description: 'Upload HTML report as artifact'
         required: false
@@ -81,6 +94,78 @@ jobs:
       - name: Get date bucket for NVD cache
         id: nvd-date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # Generates /tmp/owasp/suppressions.xml from the central FP registry in
+      # nova-devops/docs/owasp-suppressions.json. The input is a comma-separated
+      # list of CVE IDs; only CVEs with status="active" in the registry are
+      # included. Unknown CVEs emit a ::warning:: and are skipped. The output
+      # path is forwarded to the Gradle step via NOVA_OWASP_SUPPRESSIONS_FILE
+      # (consumers read it in dependencyCheck { } via System.getenv) and to the
+      # Maven step via -DsuppressionFiles=. If the registry download fails,
+      # the step warns and continues with an empty file path (no opt-in = no FP
+      # applied, which is the safe default).
+      - name: Generate dynamic CVE suppression file
+        id: cve-suppressions
+        if: ${{ inputs.cve-suppressions != '' || vars.NOVA_OWASP_CVE_SUPPRESSIONS != '' }}
+        env:
+          SUPPRESSION_LIST: ${{ inputs.cve-suppressions || vars.NOVA_OWASP_CVE_SUPPRESSIONS || '' }}
+        run: |
+          mkdir -p /tmp/owasp
+          REGISTRY_URL="https://raw.githubusercontent.com/ahincho/nova-devops/main/docs/owasp-suppressions.json"
+          if ! curl -fsSL --retry 3 -o /tmp/owasp/registry.json "$REGISTRY_URL"; then
+            echo "::warning::Could not download the FP suppression registry from nova-devops. NOVA_OWASP_CVE_SUPPRESSIONS will be IGNORED for this run."
+            echo "suppressions-file=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">'
+            IFS=',' read -ra CVES <<< "$SUPPRESSION_LIST"
+            APPLIED=0
+            SKIPPED=0
+            for cve in "${CVES[@]}"; do
+              cve="$(echo "$cve" | xargs)"
+              [ -z "$cve" ] && continue
+              entry=$(jq --arg cve "$cve" '.suppressions[] | select(.cve == $cve)' /tmp/owasp/registry.json)
+              if [ -z "$entry" ]; then
+                echo "::warning::CVE '$cve' is in NOVA_OWASP_CVE_SUPPRESSIONS but not documented in nova-devops/docs/owasp-suppressions.json. Skipping. Add an entry to the registry first (PR to nova-devops) before listing a CVE here."
+                SKIPPED=$((SKIPPED + 1))
+                continue
+              fi
+              status=$(echo "$entry" | jq -r '.status')
+              if [ "$status" != "active" ]; then
+                echo "::warning::CVE '$cve' is in registry but status is '$status' (not 'active'). Skipping. Set status to 'active' in the registry to enable."
+                SKIPPED=$((SKIPPED + 1))
+                continue
+              fi
+              pkg=$(echo "$entry" | jq -r '.package')
+              pmgr=$(echo "$entry" | jq -r '.package_manager')
+              reason=$(echo "$entry" | jq -r '.reason')
+              verified_by=$(echo "$entry" | jq -r '.verified_by')
+              verified_date=$(echo "$entry" | jq -r '.verified_date')
+              echo "  <suppress>"
+              echo "    <notes><![CDATA[$reason (documented FP, verified by $verified_by on $verified_date)]]></notes>"
+              echo "    <packageUrl>pkg:$pmgr/$pkg@*</packageUrl>"
+              echo "    <cve>$cve</cve>"
+              echo "  </suppress>"
+              APPLIED=$((APPLIED + 1))
+            done
+            echo '</suppressions>'
+          } > /tmp/owasp/suppressions.xml
+          {
+            echo "## CVE Suppressions Applied"
+            echo ""
+            echo "| Source | Count |"
+            echo "|---|---|"
+            echo "| Input | $((APPLIED + SKIPPED)) |"
+            echo "| Applied (active in registry) | $APPLIED |"
+            echo "| Skipped (not in registry or inactive) | $SKIPPED |"
+            echo ""
+            echo '```xml'
+            cat /tmp/owasp/suppressions.xml
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "suppressions-file=/tmp/owasp/suppressions.xml" >> "$GITHUB_OUTPUT"
 
       # NOTE: the cache key is a plain UTC date, NOT hashFiles(build.gradle*/pom.xml).
       # The NVD dataset changes with time, not with our own dependency versions -
@@ -145,6 +230,12 @@ jobs:
           # The Gradle plugin does NOT consume -P properties (see run-step comment),
           # so an env var is the only way to pass a per-call override here.
           NOVA_OWASP_ANALYZER_OVERRIDE: ${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || '' }}
+          # CVE suppression file path (generated by the "Generate dynamic CVE
+          # suppression file" step when cve-suppressions is set). Empty when
+          # the input is empty. Consumers that want to opt in to FP suppressions
+          # read this via System.getenv("NOVA_OWASP_SUPPRESSIONS_FILE") inside
+          # their dependencyCheck { } block and add it to suppressionFiles.
+          NOVA_OWASP_SUPPRESSIONS_FILE: ${{ steps.cve-suppressions.outputs.suppressions-file }}
         run: |
           # NOTE: the org.owasp.dependencycheck Gradle plugin does NOT read '-P'
           # command-line properties (verified against its source: DependencyCheckPlugin.groovy
@@ -269,6 +360,17 @@ jobs:
           if [ -n "${{ inputs.suppression-file }}" ]; then
             ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }}"
           fi
+          # Dynamic FP suppression file (from nova-devops registry, see
+          # cve-suppressions input). The Maven plugin accepts multiple files
+          # via a comma-separated list, so we append rather than overwrite
+          # any explicit suppression-file input above.
+          if [ -n "${{ steps.cve-suppressions.outputs.suppressions-file }}" ] && [ -s "${{ steps.cve-suppressions.outputs.suppressions-file }}" ]; then
+            if [ -n "${{ inputs.suppression-file }}" ]; then
+              ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }},${{ steps.cve-suppressions.outputs.suppressions-file }}"
+            else
+              ARGS="${ARGS} -DsuppressionFiles=${{ steps.cve-suppressions.outputs.suppressions-file }}"
+            fi
+          fi
           if [ -n "${NVD_API_KEY}" ]; then
             ARGS="${ARGS} -DnvdApiKey=${NVD_API_KEY}"
           else
@@ -295,5 +397,6 @@ jobs:
           echo "| Fail on CVSS >= | ${{ inputs.fail-on-cvss }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Build tool | ${{ inputs.build-tool }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Suppression file | ${{ inputs.suppression-file || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| CVE suppressions (registry) | ${{ inputs.cve-suppressions || vars.NOVA_OWASP_CVE_SUPPRESSIONS || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Analyzer override | ${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || 'none (all default-off analyzers disabled)' }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | ${{ steps.facts.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
