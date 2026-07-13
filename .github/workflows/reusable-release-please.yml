@@ -61,7 +61,17 @@ jobs:
         uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GH_TOKEN }}
-          release-type: ${{ inputs.release-type }}
+          # NOTE: do NOT pass release-type here. The action's behavior is:
+          #   if (inputs.releaseType) { Manifest.fromConfig({releaseType: ...}) }
+          #   else { Manifest.fromManifest(configFile, manifestFile) }
+          # Manifest.fromConfig builds an inline ReleaserConfig with ONLY a few
+          # fields (releaseType, includeComponentInTag, changelogHost,
+          # versioning, releaseAs), IGNORING the full .release-please-config.json
+          # (including skip-snapshot, bumpMinorPreMajor, packageName, etc.).
+          # That's why earlier we observed "Repository needs a snapshot bump"
+          # despite skip-snapshot:true in the config file - it was never read.
+          # We let release-type be determined from packages.*.release-type in
+          # the config file instead.
           path: ${{ inputs.path }}
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
