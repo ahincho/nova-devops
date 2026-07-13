@@ -62,13 +62,54 @@ jobs:
         id: facts
         uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
 
-      - name: Cache NVD Database
+      - name: Get date bucket for NVD cache
+        id: nvd-date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # NOTE: the cache key is a plain UTC date, NOT hashFiles(build.gradle*/pom.xml).
+      # The NVD dataset changes with time, not with our own dependency versions -
+      # keying on build files caused unnecessary invalidation on every dependency bump.
+      #
+      # This is also branch/PR-scoped by GitHub's own cache rules (a cache saved on
+      # branch A is invisible to branch B unless A is the repo's default branch), so
+      # it is a *fast path* for repeat runs on the SAME branch only. The step below
+      # ("Restore NVD mirror") is what actually solves cross-branch/cross-PR sharing.
+      #
+      # The path (~/.dependency-check-data) is a single, build-tool-agnostic location
+      # that BOTH the Gradle consumer (data.directory in build.gradle.kts) and the
+      # Maven step below (-DdataDirectory=) are explicitly pointed at. Do not assume
+      # either tool's built-in default here: they differ (Gradle's is undocumented;
+      # Maven's own default is nested inside ~/.m2/repository, which actions/setup-java's
+      # own `cache: maven` already manages independently) and mixing them silently
+      # caches nothing useful.
+      - name: Cache NVD Database (same-branch fast path)
+        id: local-cache
         uses: actions/cache@v4
         with:
-          path: ~/.gradle/dependency-check-data
-          key: ${{ runner.os }}-nvd-${{ hashFiles('**/build.gradle*', '**/pom.xml') }}
+          path: ~/.dependency-check-data
+          key: ${{ runner.os }}-nvd-${{ steps.nvd-date.outputs.date }}
           restore-keys: |
             ${{ runner.os }}-nvd-
+
+      # Single-updater/multiple-readers pattern (see docs/data/cacheh2.html):
+      # ahincho/nova-devops's nvd-mirror-update.yml is the ONLY workflow across
+      # all Nova Java repos that is allowed to do a full NVD sync, once a day.
+      # Every repo's PR/CI OWASP job just downloads that pre-built database
+      # read-only here, instead of the 12 repos hitting NVD independently
+      # (which is what caused 30-50+ min OWASP runs - see docs/java/06-semantic-versioning-en-java.md).
+      # nova-devops is a public repo, so this download needs no authentication.
+      - name: Restore NVD mirror from nova-devops (shared baseline)
+        if: steps.local-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          mkdir -p ~/.dependency-check-data
+          if curl -fsSL --retry 3 -o /tmp/nvd-mirror.zip \
+              "https://github.com/ahincho/nova-devops/releases/download/nvd-mirror/dependency-check-data.zip"; then
+            unzip -qo /tmp/nvd-mirror.zip -d ~/.dependency-check-data
+            echo "NVD mirror restored from ahincho/nova-devops (built at most ~24h ago)."
+          else
+            echo "::warning::Could not download the NVD mirror from nova-devops. Falling back to a direct (slower) sync against NVD."
+          fi
 
       - name: Run OWASP Dependency Check (Gradle)
         if: inputs.build-tool == 'gradle'
@@ -88,6 +129,11 @@ jobs:
           # / DependencyCheckExtension.groovy have no project.findProperty() calls at all).
           # All configuration must go through the typed `dependencyCheck { }` extension block
           # in each consumer's build.gradle.kts, which reads these env vars via System.getenv().
+          #
+          # '~' only expands in a shell, not in a workflow `env:` mapping or in the
+          # JVM - so the absolute path is resolved here and exported just before
+          # invoking Gradle. Must match the path cached/restored above.
+          export NOVA_OWASP_DATA_DIR="${HOME}/.dependency-check-data"
           if [ -z "${NVD_API_KEY}" ]; then
             echo "::warning::No NVD_API_KEY provided. Updates will be extremely slow/rate-limited. See https://nvd.nist.gov/developers/request-an-api-key"
           fi
@@ -101,6 +147,15 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           ARGS="-DfailBuildOnCVSS=${{ inputs.fail-on-cvss }}"
+          # Must match the path cached/restored above (Maven's own default,
+          # ~/.m2/repository/org/owasp/dependency-check-data/, is nested inside
+          # the tree actions/setup-java's `cache: maven` already manages
+          # independently - keep OWASP's data fully separate from that).
+          # NOTE: do not use `realpath` here - the directory may not exist yet
+          # on a first-ever run with no cache/mirror to restore, and Maven
+          # creates it on demand.
+          mkdir -p "${HOME}/.dependency-check-data"
+          ARGS="${ARGS} -DdataDirectory=${HOME}/.dependency-check-data"
           if [ -n "${{ inputs.suppression-file }}" ]; then
             ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }}"
           fi
