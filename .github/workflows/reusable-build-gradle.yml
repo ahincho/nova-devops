@@ -44,17 +44,34 @@ jobs:
         with:
           version-source: gradle-properties
 
+      - name: Resolve packages read token
+        id: resolve_token
+        env:
+          TOKEN_A: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
+          TOKEN_B: ${{ secrets.NOVA_RELEASE_PAT }}
+          TOKEN_C: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Pick the first non-empty token (NOVA_PACKAGES_READ_TOKEN > NOVA_RELEASE_PAT > GITHUB_TOKEN).
+          # GitHub Actions expression `secrets.X || secrets.Y` doesn't short-circuit
+          # the way bash `||` does; we do it in shell instead. Without this step,
+          # the expression evaluates to "1" (one char) when secrets.NOVA_PACKAGES_READ_TOKEN
+          # is unset (treated as null), even if secrets.NOVA_RELEASE_PAT has a value.
+          # Discovered in the notifications module publish workflow (commit bb67ea7).
+          if [ -n "${TOKEN_A}" ]; then
+            echo "value=${TOKEN_A}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${TOKEN_B}" ]; then
+            echo "value=${TOKEN_B}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${TOKEN_C}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and Test
         env:
-          # Falls back to NOVA_RELEASE_PAT (already proven to have packages:read,
-          # see docs/java/06-semantic-versioning-en-java.md §11.9.17) so cross-repo
-          # consumers (observability-spring-boot-starter, spring-boot-starter,
-          # commons-spring-boot-starter) don't need a brand-new dedicated secret.
-          # This env var was missing entirely from this step until now (§11.9.30
-          # bug B) - build.gradle.kts reads it via System.getenv(), but nothing
-          # ever set it, so it silently fell through to GITHUB_TOKEN, which
-          # cannot read packages from a different repo.
-          NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          # Used to READ internal Nova Platform dependencies published in other
+          # repos' GitHub Packages (GITHUB_TOKEN cannot read packages cross-repo).
+          # The resolve_token step picks the first non-empty secret out of
+          # NOVA_PACKAGES_READ_TOKEN / NOVA_RELEASE_PAT / GITHUB_TOKEN.
+          NOVA_PACKAGES_READ_TOKEN: ${{ steps.resolve_token.outputs.value }}
         run: ./gradlew build
 
       - name: Lint - Checkstyle
