@@ -4,6 +4,24 @@ Repositorio centralizado de workflows reutilizables y composite actions de GitHu
 
 Estos workflows proporcionan un pipeline de CI/CD estandarizado con variantes dedicadas para **Maven** y **Gradle KTS**, lo que permite un caché de dependencias nativo y pipelines más limpios sin pasos condicionales.
 
+## Política de Versionado y Branches
+
+> ⚠️ **Este repositorio NO usa Semantic Versioning.** Todos los workflows y composite actions aquí contenidos se referencian **siempre con `@main`**.
+
+- **Branch única:** `main`. No hay branches de release ni de feature de larga duración.
+- **Sin tags SemVer:** no se crean tags `vX.Y.Z` para workflows ni composite actions. Los workflows cambian continuamente en `main` y los consumidores siguen esa rama.
+- **Sin `release-please`:** este repo no tiene `.release-please-config.json` ni `.release-please-manifest.json`. El versionado de workflows es por commit, no por release.
+- **Único tag permitido:** `nvd-mirror`, que es un artefacto de datos binarios (mirror del dataset OWASP NVD) auto-actualizado por el workflow `nvd-mirror-update.yml`. No es un release SemVer.
+
+**Implicancia para los consumidores:** todos los repos de librería Nova deben referenciar este repo como:
+
+```yaml
+uses: ahincho/nova-devops/.github/workflows/reusable-XYZ.yml@main
+uses: ahincho/nova-devops/.github/actions/nova-XYZ@main
+```
+
+Pinear a `@vX.Y.Z` queda explícitamente **fuera de scope** y no se garantiza compatibilidad.
+
 ## Workflows Disponibles
 
 ### Workflows Maven
@@ -675,11 +693,4 @@ steps:
 
 ## Versionado de las Composite Actions
 
-Las composite actions siguen el mismo patrón SemVer que las librerías Java:
-
-- `v1.0.0` — primera versión estable
-- Breaking changes en la API de inputs/outputs → bump major
-- Nuevos inputs opcionales → bump minor
-- Bugfixes internos → bump patch
-
-Hasta que se genere el primer tag, se pueden referenciar con `@main` (HEAD) o `@<commit-sha>` (inmutable).
+Este repositorio **no usa Semantic Versioning** (ver [Política de Versionado y Branches](#política-de-versionado-y-branches) arriba). Las composite actions se referencian siempre con `@main` (HEAD) o, para máxima inmutabilidad y reproducibilidad de un run específico, con un commit SHA: `@<commit-sha>`.
