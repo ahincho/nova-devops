@@ -98,7 +98,7 @@ jobs:
           else
             gh release create "${MIRROR_TAG}" "${MIRROR_ASSET}" \
               --repo "${{ github.repository }}" \
-              --title "NVD dependency-check data mirror (auto-updated daily)" \
+              --title "NVD Mirror" \
               --notes "Not a software release - internal artifact. Shared, read-only OWASP dependency-check NVD database consumed by reusable-owasp-check.yml across all Nova Java repos. Rebuilt daily by this workflow." \
               --latest=false
           fi
