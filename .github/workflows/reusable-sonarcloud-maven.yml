@@ -17,8 +17,12 @@ on:
         required: true
         type: string
     secrets:
-      SONAR_TOKEN:
-        description: 'SonarCloud authentication token. If not configured, this workflow skips analysis with a warning instead of failing.'
+      NOVA_SONAR_TOKEN:
+        description: >-
+          SonarCloud authentication token. If not configured, this workflow skips
+          analysis with a warning instead of failing. DORMANT (no Nova repo has
+          this secret configured yet as of 2026-07-15; will be activated when
+          SonarCloud integration is rolled out per docs/java/11 §11.10).
         required: false
 
 jobs:
@@ -26,14 +30,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check SONAR_TOKEN availability
+      - name: Check NOVA_SONAR_TOKEN availability
         id: check-token
         shell: bash
         env:
-          TOKEN: ${{ secrets.SONAR_TOKEN }}
+          TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
         run: |
           if [ -z "${TOKEN}" ]; then
-            echo "::warning::SONAR_TOKEN secret is not configured for this repo/org. Skipping SonarCloud analysis. Create a project at sonarcloud.io and add the SONAR_TOKEN secret to enable this check."
+            echo "::warning::NOVA_SONAR_TOKEN secret is not configured for this repo/org. Skipping SonarCloud analysis. Create a project at sonarcloud.io and add the NOVA_SONAR_TOKEN secret to enable this check."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -66,4 +70,4 @@ jobs:
           -Dsonar.host.url=https://sonarcloud.io
           -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
