@@ -87,12 +87,16 @@ $ReposBCDE = @(
 # 5 repos con PAT residual sin consumer real
 #   * 2 repos base (parent POM + devops): no publican nada
 #   * 3 repos demo de Nova Notifications: creados 2026-07-15 sin workflows
+#   * nova-java-quarkus-template: sin workflows (recien agregado 2026-07-15)
+# NO incluye nova-java-architecture-rules: ese SI usa NOVA_RELEASE_PAT
+# activamente en ci.yml para resolver packages cross-repo con Maven.
 $ReposResidual = @(
   'nova-devops'
   'nova-java-spring-boot-parent'
   'demo-notifications-micronaut'
   'demo-notifications-quarkus'
   'demo-notifications-spring-boot'
+  'nova-java-quarkus-template'
 )
 
 # ============================================================
@@ -189,8 +193,14 @@ function Remove-Secret {
     Write-Host "  [DRY-RUN] gh secret delete $SecretName --repo $target" -ForegroundColor Yellow
     return
   }
+  # Check first if the secret exists (idempotent + skip on 404)
+  $existing = gh secret list -R $target 2>&1 | Where-Object { $_ -match "^$SecretName\s" }
+  if (-not $existing) {
+    Write-Host "  -> $target : $SecretName no existe, saltando" -ForegroundColor Yellow
+    return
+  }
   Write-Host "  -> $target : eliminando $SecretName" -ForegroundColor Green
-  gh secret delete $SecretName --repo $target 2>&1 | Out-Null
+  gh secret delete $SecretName -R $target 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Fall\u00f3 gh secret delete en $target (exit code $LASTEXITCODE)."
   }
