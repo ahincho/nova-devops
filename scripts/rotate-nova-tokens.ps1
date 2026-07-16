@@ -9,17 +9,20 @@
 
   Fases (cada una se puede ejecutar por separado):
     propagate-read     Configura NOVA_PACKAGES_READ_TOKEN en los 7 repos B/C/D.
-    rotate-pat         Sobrescribe NOVA_RELEASE_PAT en los 7 repos B/C/D con un valor nuevo.
-    cleanup-residual   Borra NOVA_RELEASE_PAT residual de nova-devops y spring-boot-parent.
+    purge-pat          BORRA NOVA_RELEASE_PAT de los 7 repos B/C/D (era residual, ya no
+                       se usa tras la migracion a workflow_run + GITHUB_TOKEN puro).
+                       No requiere valor de PAT: solo borra el secret.
+    cleanup-residual   Borra NOVA_RELEASE_PAT residual de nova-devops, spring-boot-parent
+                       y los 3 repos demo.
 
   Seguridad:
     * El script NUNCA contiene valores de tokens. Solo acepta env vars o prompt interactivo.
-    * Pasa el valor a `gh secret set` por stdin (no por linea de comandos) para que
+    * En la fase propagate-read, pasa el valor a `gh secret set` por stdin para que
       no aparezca en el process listing ni en transcript de shell.
-    * Mascara cualquier eco accidental del valor.
+    * Las fases purge-pat y cleanup-residual NO requieren tokens (solo borran secrets).
 
 .PARAMETER Phase
-  Una de: propagate-read, rotate-pat, cleanup-residual, all.
+  Una de: propagate-read, purge-pat, cleanup-residual, all.
 
 .PARAMETER DryRun
   Solo muestra las acciones que realizaria sin ejecutarlas.
@@ -29,20 +32,19 @@
 
 .ENVIRONMENT VARIABLES
   NOVA_PACKAGES_READ_TOKEN   Token de solo lectura para consumir releases de otros repos.
-  NOVA_RELEASE_PAT           PAT classic con scope 'repo' para publish.
+                             Solo necesario para la fase propagate-read.
 
 .EXAMPLE
-  # 1. Propagar READ (sin rotar PAT todavia)
+  # 1. Propagar READ (si no se hizo antes)
   $env:NOVA_PACKAGES_READ_TOKEN = '<token-de-read>'
   powershell -File scripts/rotate-nova-tokens.ps1 -Phase propagate-read
 
 .EXAMPLE
-  # 2. Rotar PAT en los 7 repos B/C/D (cuando estes listo)
-  $env:NOVA_RELEASE_PAT = '<nuevo-pat>'
-  powershell -File scripts/rotate-nova-tokens.ps1 -Phase rotate-pat
+  # 2. Borrar NOVA_RELEASE_PAT residual de los 7 repos B/C/D (no requiere PAT nuevo)
+  powershell -File scripts/rotate-nova-tokens.ps1 -Phase purge-pat
 
 .EXAMPLE
-  # 3. Borrar PAT residual de los 2 repos que no lo usan
+  # 3. Borrar PAT residual de los 5 repos que no lo usan
   powershell -File scripts/rotate-nova-tokens.ps1 -Phase cleanup-residual
 
 .EXAMPLE
@@ -57,7 +59,7 @@
 [CmdletBinding()]
 param(
   [Parameter()]
-  [ValidateSet('propagate-read', 'rotate-pat', 'cleanup-residual', 'all')]
+  [ValidateSet('propagate-read', 'purge-pat', 'cleanup-residual', 'all')]
   [string]$Phase = 'all',
 
   [switch]$DryRun,
@@ -235,31 +237,27 @@ function Invoke-PropagateRead {
   Write-Info 'Antes de Fase 2, valida un publish real en uno de estos repos.'
 }
 
-function Invoke-RotatePat {
+function Invoke-PurgePat {
   [CmdletBinding()]
   param()
 
-  Write-Banner 'Fase 2: rotate NOVA_RELEASE_PAT'
+  Write-Banner 'Fase 2: purge NOVA_RELEASE_PAT (7 repos B/C/D)'
   Write-Info "Repos objetivo ($($ReposBCDE.Count)):"
   foreach ($r in $ReposBCDE) {
     Write-Host "    - $Owner/$r"
   }
-  Write-Warn 'Esta operacion SOBREESCRIBE el valor de NOVA_RELEASE_PAT en cada repo.'
-  Write-Warn 'El PAT viejo quedara INVALIDADO en estos repos apenas completes esta fase.'
+  Write-Warn 'Esta operacion BORRA el secret NOVA_RELEASE_PAT de cada repo.'
+  Write-Warn 'No requiere valor nuevo: el secret ya no se usa en ningun workflow.'
+  Write-Warn 'A partir de esta fase, publish se hace 100% con GITHUB_TOKEN.'
 
-  $value = Get-SecretValue -EnvVarName 'NOVA_RELEASE_PAT'
-  if ($value.Length -lt 10) {
-    throw "NOVA_RELEASE_PAT parece demasiado corto (longitud=$($value.Length))."
-  }
-
-  Confirm-Continue "Rotar NOVA_RELEASE_PAT en $($ReposBCDE.Count) repos?"
+  Confirm-Continue "Borrar NOVA_RELEASE_PAT de $($ReposBCDE.Count) repos?"
 
   foreach ($r in $ReposBCDE) {
-    Set-Secret -Repo $r -SecretName 'NOVA_RELEASE_PAT' -SecretValue $value
+    Remove-Secret -Repo $r -SecretName 'NOVA_RELEASE_PAT'
   }
 
   Write-Ok 'Fase 2 completa.'
-  Write-Info 'Dispara un publish real en uno de estos repos para validar.'
+  Write-Info 'Despues de esta fase, tambien revoca el fine-grained token en la UI.'
 }
 
 function Invoke-CleanupResidual {
@@ -290,11 +288,11 @@ try {
 
   switch ($Phase) {
     'propagate-read'   { Invoke-PropagateRead }
-    'rotate-pat'       { Invoke-RotatePat }
+    'purge-pat'        { Invoke-PurgePat }
     'cleanup-residual' { Invoke-CleanupResidual }
     'all' {
       Invoke-PropagateRead
-      Invoke-RotatePat
+      Invoke-PurgePat
       Invoke-CleanupResidual
     }
   }
