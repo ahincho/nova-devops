@@ -1,4 +1,4 @@
-﻿# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
 # - External actions: pinned to commit SHAs of the desired version tag
 # - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
 # To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Nova Resolve Token
         id: resolve_token
@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload Test Reports
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: test-reports
           path: |
@@ -87,7 +87,7 @@ jobs:
 
       - name: Upload JavaDoc
         if: success()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: javadoc
           path: |

@@ -1,4 +1,4 @@
-﻿# All `uses:` refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# All `uses:` refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
 # - External actions: pinned to commit SHAs of the desired version tag
 # - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
 # To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
@@ -65,7 +65,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -154,6 +154,6 @@ jobs:
       # remote artifacts.
       - name: Attest deployed jars (SLSA provenance)
         if: inputs.dry-run != 'true'
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
         with:
           subject-path: '**/target/*.jar'
