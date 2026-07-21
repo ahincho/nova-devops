@@ -1,510 +1,333 @@
 # nova-devops
 
-Repositorio centralizado de workflows reutilizables y composite actions de GitHub Actions para el ecosistema de librerías Java de `pe.edu.nova`.
-
-Estos workflows proporcionan un pipeline de CI/CD estandarizado con variantes dedicadas para **Maven** y **Gradle KTS**, lo que permite un caché de dependencias nativo y pipelines más limpios sin pasos condicionales.
-
-## Política de Versionado y Branches
-
-> ⚠️ **Este repositorio NO usa Semantic Versioning.** Todos los workflows y composite actions aquí contenidos se referencian **siempre con `@main`**.
-
-- **Branch única:** `main`. No hay branches de release ni de feature de larga duración.
-- **Sin tags SemVer:** no se crean tags `vX.Y.Z` para workflows ni composite actions. Los workflows cambian continuamente en `main` y los consumidores siguen esa rama.
-- **Sin `release-please`:** este repo no tiene `.release-please-config.json` ni `.release-please-manifest.json`. El versionado de workflows es por commit, no por release.
-- **Único tag permitido:** `nvd-mirror`, que es un artefacto de datos binarios (mirror del dataset OWASP NVD) auto-actualizado por el workflow `nvd-mirror-update.yml`. No es un release SemVer.
-
-**Implicancia para los consumidores:** todos los repos de librería Nova deben referenciar este repo como:
-
-```yaml
-uses: ahincho/nova-devops/.github/workflows/reusable-XYZ.yml@main
-uses: ahincho/nova-devops/.github/actions/nova-XYZ@main
-```
-
-Pinear a `@vX.Y.Z` queda explícitamente **fuera de scope** y no se garantiza compatibilidad.
-
-## Workflows Disponibles
-
-### Workflows Maven
-
-| Workflow | Archivo | Descripción |
-|---|---|---|
-| [Build y Tests (Maven)](#1-reusable-build-mavenyml) | `reusable-build-maven.yml` | Compilación, lint (Checkstyle), tests y JavaDoc con Maven |
-| [SonarCloud (Maven)](#2-reusable-sonarcloud-mavenyml) | `reusable-sonarcloud-maven.yml` | Cobertura JaCoCo y análisis SonarCloud con Maven |
-| [Publicación (Maven)](#3-reusable-publish-mavenyml) | `reusable-publish-maven.yml` | Publicación de artefactos JAR en GitHub Packages con Maven |
-
-### Workflows Gradle
-
-| Workflow | Archivo | Descripción |
-|---|---|---|
-| [Build y Tests (Gradle)](#4-reusable-build-gradleyml) | `reusable-build-gradle.yml` | Compilación, lint (Checkstyle), tests y JavaDoc con Gradle |
-| [SonarCloud (Gradle)](#5-reusable-sonarcloud-gradleyml) | `reusable-sonarcloud-gradle.yml` | Cobertura JaCoCo y análisis SonarCloud con Gradle |
-| [Publicación (Gradle)](#6-reusable-publish-gradleyml) | `reusable-publish-gradle.yml` | Publicación de artefactos JAR en GitHub Packages con Gradle |
-
-### Workflows de Release (cross-stack)
-
-| Workflow | Archivo | Descripción |
-|---|---|---|
-| [Release Publish (Sprint 3)](#7-reusable-release-publishyml-sprint-3--nova-semver-13) | `reusable-release-publish.yml` | Publish al dispararse un tag `vX.Y.Z` creado por release-please |
-| [Release Please](#8-reusable-release-pleaseyml) | `reusable-release-please.yml` | Orquestador de release automático basado en `release-please` |
-
-### Beneficio del Caché de Dependencias
-
-Al separar los workflows por herramienta de build, cada variante configura `actions/setup-java@v4` con el parámetro `cache` correspondiente (`'maven'` o `'gradle'`). Esto habilita el caché nativo de dependencias de GitHub Actions, reduciendo significativamente los tiempos de ejecución en pipelines subsecuentes.
-
-Las composite actions de setup (`nova-setup-java`, `nova-setup-node`) extienden este patrón con caché de `node_modules` y `gradle.properties` configurable.
-
-## Composite Actions Disponibles
-
-Composite actions reutilizables (en `.github/actions/`):
-
-| Composite Action | Descripción |
-|---|---|
-| [`nova-setup-java`](#composite-action-nova-setup-java) | Setup Java 25 + cache Gradle/Maven + validación de build files |
-| [`nova-setup-node`](#composite-action-nova-setup-node) | Setup Node.js + cache `node_modules` + `npm ci` |
-| [`nova-setup-gpg`](#composite-action-nova-setup-gpg) | Import GPG key (preparado, clave aún no generada) |
-
----
-
-## 1. reusable-build-maven.yml
-
-Workflow reutilizable que compila el proyecto Maven, ejecuta los tests, verifica el estilo de código con Checkstyle y genera la documentación JavaDoc.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `java-version` | `string` | no | `'25'` | Versión de Java a usar |
-
-### Secretos Requeridos
-
-Ninguno.
-
-### Artefactos Generados
-
-| Artefacto | Descripción |
-|---|---|
-| `test-reports` | Reportes de tests (Surefire) |
-| `javadoc` | Documentación JavaDoc generada |
-
-### Pasos del Pipeline
-
-| Paso | Comando |
-|---|---|
-| Compilación y Tests | `mvn verify` |
-| Lint (Checkstyle) | `mvn checkstyle:check` |
-| JavaDoc | `mvn javadoc:javadoc` |
-
-### Ejemplo de Uso
-
-```yaml
-jobs:
-  build:
-    uses: <org>/nova-devops/.github/workflows/reusable-build-maven.yml@main
-    with:
-      java-version: '25'
-```
-
----
-
-## 2. reusable-sonarcloud-maven.yml
-
-Workflow reutilizable que genera el reporte de cobertura con JaCoCo y ejecuta el análisis de calidad de código en SonarCloud para proyectos Maven.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `java-version` | `string` | no | `'25'` | Versión de Java a usar |
-| `sonar-org` | `string` | sí | — | Organización en SonarCloud |
-| `sonar-project-key` | `string` | sí | — | Clave del proyecto en SonarCloud |
-
-### Secretos Requeridos
-
-| Secreto | Descripción |
-|---|---|
-| `NOVA_SONAR_TOKEN` | Token de autenticación de SonarCloud |
-
-### Pasos del Pipeline
-
-| Paso | Comando |
-|---|---|
-| Cobertura JaCoCo | `mvn verify jacoco:report` |
-| Análisis SonarCloud | `mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar` |
-
-### Ejemplo de Uso
-
-```yaml
-jobs:
-  sonar:
-    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-maven.yml@main
-    with:
-      sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_nova-mask-utils
-    secrets:
-      NOVA_SONAR_TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
-```
-
----
-
-## 3. reusable-publish-maven.yml
-
-Workflow reutilizable que publica el artefacto JAR de la librería Maven en GitHub Packages. Soporta `visibility` configurable (public/private) y `dry-run`.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `java-version` | `string` | no | `'25'` | Versión de Java a usar |
-| `visibility` | `string` | no | `vars.NOVA_PACKAGE_VISIBILITY` o `'public'` | Visibilidad del paquete (`public` / `private`) |
-| `dry-run` | `string` | no | `'false'` | Si es `'true'`, hace deploy a `file:///tmp/maven-dry-run` |
-
-### Secretos Requeridos
-
-| Secreto | Descripción |
-|---|---|
-| `GITHUB_TOKEN` | Token para autenticarse con GitHub Packages |
-
-### Pasos del Pipeline
-
-| Paso | Comando |
-|---|---|
-| Publicación | `mvn deploy -DskipTests -Dvisibility=$VISIBILITY` |
-
-### Notas
-
-- Usa la composite action `nova-setup-java` (sprint 1) que valida `pom.xml` y configura caché de Maven.
-- Valida que la visibilidad del paquete sea compatible con la visibilidad del repo.
-- Genera `~/.m2/settings.xml` con la credencial de GitHub Packages.
-
-### Prerrequisitos en el Repositorio
-
-El `pom.xml` debe incluir la sección `distributionManagement`:
-
-```xml
-<distributionManagement>
-    <repository>
-        <id>github</id>
-        <name>GitHub Packages</name>
-        <url>https://maven.pkg.github.com/OWNER/nombre-repositorio</url>
-    </repository>
-</distributionManagement>
-```
-
-### Ejemplo de Uso
-
-```yaml
-jobs:
-  publish:
-    uses: <org>/nova-devops/.github/workflows/reusable-publish-maven.yml@main
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
----
-
-## 4. reusable-build-gradle.yml
-
-Workflow reutilizable que compila el proyecto Gradle, ejecuta los tests, verifica el estilo de código con Checkstyle y genera la documentación JavaDoc.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `java-version` | `string` | no | `'25'` | Versión de Java a usar |
-
-### Secretos Requeridos
-
-Ninguno.
-
-### Artefactos Generados
-
-| Artefacto | Descripción |
-|---|---|
-| `test-reports` | Reportes de tests (HTML) |
-| `javadoc` | Documentación JavaDoc generada |
-
-### Pasos del Pipeline
-
-| Paso | Comando |
-|---|---|
-| Compilación y Tests | `./gradlew build` |
-| Lint (Checkstyle) | `./gradlew checkstyleMain checkstyleTest` |
-| JavaDoc | `./gradlew javadoc` |
-
-### Ejemplo de Uso
-
-```yaml
-jobs:
-  build:
-    uses: <org>/nova-devops/.github/workflows/reusable-build-gradle.yml@main
-```
-
----
-
-## 5. reusable-sonarcloud-gradle.yml
-
-Workflow reutilizable que genera el reporte de cobertura con JaCoCo y ejecuta el análisis de calidad de código en SonarCloud para proyectos Gradle.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `java-version` | `string` | no | `'25'` | Versión de Java a usar |
-| `sonar-org` | `string` | sí | — | Organización en SonarCloud |
-| `sonar-project-key` | `string` | sí | — | Clave del proyecto en SonarCloud |
-
-### Secretos Requeridos
-
-| Secreto | Descripción |
-|---|---|
-| `NOVA_SONAR_TOKEN` | Token de autenticación de SonarCloud |
-
-### Pasos del Pipeline
-
-| Paso | Comando |
-|---|---|
-| Cobertura JaCoCo | `./gradlew build jacocoTestReport` |
-| Análisis SonarCloud | `./gradlew sonar` |
-
-### Ejemplo de Uso
-
-```yaml
-jobs:
-  sonar:
-    uses: <org>/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
-    with:
-      sonar-org: mi-organizacion
-      sonar-project-key: mi-organizacion_nova-date-utils
-    secrets:
-      NOVA_SONAR_TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
-```
-
----
-
-## 6. reusable-publish-gradle.yml
-
-Workflow reutilizable que publica el artefacto JAR de la librería Gradle en GitHub Packages. Soporta `visibility` configurable (public/private) y `dry-run`.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `java-version` | `string` | no | `'25'` | Versión de Java a usar |
-| `visibility` | `string` | no | `vars.NOVA_PACKAGE_VISIBILITY` o `'public'` | Visibilidad del paquete (`public` / `private`) |
-| `dry-run` | `string` | no | `'false'` | Si es `'true'`, usa `gradle publishToMavenLocal` |
-
-### Secretos Requeridos
-
-| Secreto | Descripción |
-|---|---|
-| `GITHUB_TOKEN` | Token para autenticarse con GitHub Packages |
-
-### Pasos del Pipeline
-
-| Paso | Comando |
-|---|---|
-| Publicación | `./gradlew publish -Pvisibility=$VISIBILITY` |
-| Dry-run | `./gradlew publishToMavenLocal -Pvisibility=$VISIBILITY` |
-
-### Notas
-
-- Usa la composite action `nova-setup-java` (sprint 1) que valida `gradle.properties` y configura `gradle/actions/setup-gradle@v4`.
-- Valida que la visibilidad del paquete sea compatible con la visibilidad del repo.
-- La propiedad Gradle `-Pvisibility=$VISIBILITY` permite que el `build.gradle.kts` ajuste la configuracion segun la visibilidad.
-
-### Prerrequisitos en el Repositorio
-
-El `build.gradle.kts` debe incluir el bloque `publishing`:
-
-```kotlin
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"])
-        }
-    }
-    repositories {
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/OWNER/nombre-repositorio")
-            credentials {
-                username = System.getenv("GITHUB_ACTOR")
-                password = System.getenv("GITHUB_TOKEN")
-            }
-        }
-    }
-}
-```
-
-### Ejemplo de Uso
-
-```yaml
-jobs:
-  publish:
-    uses: <org>/nova-devops/.github/workflows/reusable-publish-gradle.yml@main
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
----
-
-## 7. reusable-release-publish.yml (Sprint 3 — NOVA-SEMVER-13)
-
-Workflow reutilizable que se ejecuta al hacer push de un tag `vX.Y.Z` (formato semver estricto). Suplanta el antiguo par `version-bump` + `publish` con una cadena determinista de un solo paso.
-
-### Disparador
-
-- `on: workflow_call` (llamado desde `publish-on-tag.yml`).
-- El workflow llamador debe configurarse con `on: push: tags: ['v[0-9]+.[0-9]+.[0-9]+']`.
-
-### Pasos del Pipeline
-
-1. **Validate tag format**: verifica que el tag cumpla `^v[0-9]+\.[0-9]+\.[0-9]+$`.
-2. **Sync version from tag to gradle.properties**: escribe `version=<version-sin-v>` en `gradle.properties`.
-3. **Nova Setup Java**: composite action con Java 25 + caché Gradle.
-4. **Resolve package visibility**: prioridad `input > vars.NOVA_PACKAGE_VISIBILITY > "public"`.
-5. **Validate visibility compatibility**: rechaza combinaciones inválidas (public repo + private package).
-6. **Publish to GitHub Packages**: `./gradlew publish -Pvisibility=...`.
-
-### Reemplazo del patrón antiguo
-
-Antes (NO recomendado):
-```yaml
-publish:
-  if: github.event_name == 'push'
-  needs: version-bump
-  uses: ahincho/nova-devops/.github/workflows/reusable-publish-gradle.yml@main
-```
-
-Ahora:
-```yaml
-# publish-on-tag.yml
-on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
-jobs:
-  publish:
-    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@main
-    secrets: inherit
-```
-
-### Notas
-
-- Este workflow **reemplaza** `reusable-publish-{gradle,maven}.yml` como mecanismo oficial de publicación de releases para los repos migrados a Sprint 3.
-- El versionado se delega completamente a `release-please` (§ 8). El tag `vX.Y.Z` que crea `release-please` al mergear su PR es lo que dispara este workflow.
-
----
-
-## 8. reusable-release-please.yml
-
-Workflow reutilizable que ejecuta [`release-please`](https://github.com/googleapis/release-please) de Google para automatizar releases basados en Conventional Commits. Crea PRs de release que bumpean la versión, actualizan CHANGELOG.md, y al mergear crean GitHub Releases + tags.
-
-### Parámetros de Entrada
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|---|---|---|---|---|
-| `release-type` | `string` | no | `'java'` | Tipo de release: `java`, `gradle`, `maven`, `python`, `node`, `go`, `rust`, `php`, `ruby`, `elixir` |
-| `package-name` | `string` | no | repo name | Nombre del paquete (para multi-package repos) |
-| `config-file` | `string` | no | `'.release-please-config.json'` | Path al config de release-please |
-| `manifest-file` | `string` | no | `''` | Path al manifest (para multi-repo coordination) |
-| `node-version` | `string` | no | `'20'` | Versión de Node.js |
-| `target-branch` | `string` | no | `'main'` | Branch target para los PRs de release |
-
-### Secretos Requeridos
-
-| Secreto | Descripción |
-|---|---|
-| `GH_TOKEN` | Token con permisos `contents:write` y `pull-requests:write` |
-
-### Configuración por repo (`.release-please-config.json`)
-
-Cada repo Java debe tener su propio config:
-
-```json
-{
-  "packages": {
-    ".": {
-      "release-type": "java",
-      "package-name": "nova-java-spring-boot-mask-utils",
-      "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true
-    }
-  }
-}
-```
-
-### Uso desde un workflow llamador
-
-```yaml
-# .github/workflows/release-please.yml (en cada repo)
-name: Release Please
-on:
-  push:
-    branches: [main]
-permissions:
-  contents: write
-  pull-requests: write
-jobs:
-  release-please:
-    uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@main
-    secrets:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-### Notas
-
-- No usa `nova-setup-node` porque `googleapis/release-please-action@v4` trae su propio setup de Node.
-- Compatible con manifest mode para multi-repo coordination (un repo coordina releases de varios).
-- Ver `docs/06-semantic-versioning-en-java.md` sección 8.6 para más detalles.
-
----
-
-## Ejemplo Completo de Workflow Llamador (ci.yml)
-
-A continuación se muestra un ejemplo completo de un workflow llamador que orquesta todos los workflows reutilizables. Este archivo se coloca en cada repositorio de librería en `.github/workflows/ci.yml`.
-
-> **Flujo de release oficial (a partir de Sprint 3 — NOVA-SEMVER-13):** el versionado se delega a `release-please`, que crea un PR con el bump propuesto y, al hacer merge, genera un tag `vX.Y.Z`. El tag dispara el publish. **El push directo a `main` ya no bumpea versión.**
-
-### Estructura de archivos en cada repo
+Centralized repository of reusable workflows and composite actions for GitHub Actions, powering the CI/CD pipelines of the `pe.edu.nova` Java library ecosystem.
+
+This repository provides a standardized CI/CD pipeline with dedicated variants for **Maven** and **Gradle KTS**, native dependency caching, security scanning (CodeQL, OWASP Dependency-Check, SonarCloud, SBOM), automated versioning via [release-please](https://github.com/googleapis/release-please), and tag-based publication to GitHub Packages.
+
+> All workflows and composite actions are referenced using **commit SHAs** (Lote Q, July 2026). Pinning to a branch (`@main`) or a SemVer tag (`@vX.Y.Z`) is **not supported** and breaks reproducibility. The canonical internal action SHA is `300f6695c82197f50b2cfa0831bd146ed549a279`.
+
+## Table of Contents
+
+- [Repository Layout](#repository-layout)
+- [Branches and Versioning Policy](#branches-and-versioning-policy)
+- [Available Reusable Workflows](#available-reusable-workflows)
+  - [Build Pipelines](#build-pipelines)
+  - [Quality and Security Pipelines](#quality-and-security-pipelines)
+  - [Publish Pipelines](#publish-pipelines)
+  - [Release Orchestration](#release-orchestration)
+  - [Standalone Workflows](#standalone-workflows)
+- [Available Composite Actions](#available-composite-actions)
+- [Pester Test Suite](#pester-test-suite)
+- [PowerShell Operator Scripts](#powershell-operator-scripts)
+- [Migrations](#migrations)
+- [Security Posture](#security-posture)
+- [Required Secrets and Variables](#required-secrets-and-variables)
+- [Consumer Repository Example](#consumer-repository-example)
+- [Library Ecosystem](#library-ecosystem)
+- [Branch Protection Rules](#branch-protection-rules)
+- [Dependabot Configuration](#dependabot-configuration)
+
+## Repository Layout
 
 ```
 .github/
-  workflows/
-    ci.yml                 # PR + build + sonar
-    release-please.yml     # push a main → PR de release
-    publish-on-tag.yml     # tag vX.Y.Z → publish
-.release-please-config.json
-.release-please-manifest.json
+  workflows/                          # 15 reusable + standalone workflows
+    codeql.yml                        # CodeQL static analysis
+    nvd-mirror-update.yml             # OWASP NVD mirror maintenance
+    publish-on-tag.yml                # Local caller for tag-based publish
+    reusable-build-gradle.yml         # Build + test + lint + javadoc (Gradle)
+    reusable-build-maven.yml          # Build + test + lint + javadoc (Maven)
+    reusable-build-matrix.yml         # Matrix build across Java/Gradle versions
+    reusable-owasp-check.yml          # OWASP Dependency-Check (SCA)
+    reusable-package-retention.yml    # Cleanup old SNAPSHOTs on GitHub Packages
+    reusable-publish-gradle.yml       # DEPRECATED — use reusable-release-publish.yml
+    reusable-publish-maven.yml        # DEPRECATED — use reusable-release-publish.yml
+    reusable-release-maven-publish.yml # Maven tag-based release publish
+    reusable-release-please.yml       # release-please orchestrator
+    reusable-release-publish.yml      # Gradle tag-based release publish
+    reusable-sbom.yml                 # CycloneDX SBOM generation
+    reusable-sonarcloud-gradle.yml    # SonarCloud + JaCoCo (Gradle)
+    reusable-sonarcloud-maven.yml     # SonarCloud + JaCoCo (Maven)
+  actions/                            # 7 composite actions
+    nova-gather-facts/
+    nova-publish-aggregator/
+    nova-resolve-token/
+    nova-setup-gpg/
+    nova-setup-java/
+    nova-setup-node/
+    nova-validate-build/
+  migrations/                         # Bundle migrations applied via gh CLI
+    nova-bom-lote-f/
+    nova-java-spring-boot-parent-lote-f/
+tests/                                # Pester 5.7.1 test suite (148 tests)
+scripts/                              # PowerShell operator scripts
+  apply-nova-labels.ps1
+  apply-nova-metadata.ps1
+  rotate-nova-tokens.ps1
 ```
 
-### `ci.yml` (común a todos los repos)
+## Branches and Versioning Policy
+
+| Branch | Protection | Purpose |
+|---|---|---|
+| `main` | Strict (1 review, enforce_admins, CodeQL required) | Production. All releases target this branch. |
+| `dev` | Soft (1 review, no enforce_admins, CodeQL required) | Integration. Feature branches land here before `main`. |
+
+**This repository does not use Semantic Versioning for workflows or composite actions.** The reference is always a **40-character commit SHA** (see Lote Q in CHANGELOG). The only tag in this repository is `nvd-mirror`, which is a binary data artifact (mirror of the OWASP NVD dataset) auto-updated by the `nvd-mirror-update.yml` workflow. It is not a SemVer release.
+
+**Implication for consumers:** every library repository must reference this repository using a pinned commit SHA:
 
 ```yaml
-name: CI/CD Pipeline
+uses: ahincho/nova-devops/.github/workflows/reusable-XYZ.yml@300f6695c82197f50b2cfa0831bd146ed549a279
+uses: ahincho/nova-devops/.github/actions/nova-XYZ@300f6695c82197f50b2cfa0831bd146ed549a279
+```
+
+Pinning to `@main`, `@vX.Y.Z`, or a non-SHA ref is **out of scope** and breaks reproducibility guarantees.
+
+## Available Reusable Workflows
+
+All `reusable-*.yml` workflows are invoked via `workflow_call`. They are consumed by lightweight caller workflows in the consumer repository (typically `.github/workflows/ci.yml`).
+
+### Build Pipelines
+
+#### `reusable-build-maven.yml`
+Compiles a Maven project, runs the test suite, enforces Checkstyle, and generates JavaDoc.
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `java-version` | string | no | `'25'` | JDK version to use |
+
+**Secrets required:** none.
+
+**Artifacts produced:**
+
+- `test-reports` — Surefire test reports
+- `javadoc` — Generated JavaDoc HTML
+
+**Pipeline steps:**
+
+| Step | Command |
+|---|---|
+| Build and test | `mvn verify` |
+| Lint (Checkstyle) | `mvn checkstyle:check` |
+| JavaDoc | `mvn javadoc:javadoc` |
+
+#### `reusable-build-gradle.yml`
+Same purpose as the Maven variant, for Gradle KTS projects.
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `java-version` | string | no | `'25'` | JDK version to use |
+
+**Pipeline steps:** `./gradlew build`, `./gradlew checkstyleMain checkstyleTest`, `./gradlew javadoc`.
+
+#### `reusable-build-matrix.yml`
+Matrix build that runs the Gradle pipeline across multiple Java/Gradle version combinations. Used in this repository to validate that workflows themselves remain green across supported runtime versions.
+
+### Quality and Security Pipelines
+
+#### `reusable-sonarcloud-maven.yml`
+Generates JaCoCo coverage and runs SonarCloud analysis for Maven projects.
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `java-version` | string | no | `'25'` | JDK version to use |
+| `sonar-org` | string | yes | — | SonarCloud organization |
+| `sonar-project-key` | string | yes | — | SonarCloud project key |
+| `sonar-host-url` | string | no | `'https://sonarcloud.io'` | SonarQube/SonarCloud URL |
+| `sonar-coverage-exclusions` | string | no | `''` | Comma-separated coverage exclusions |
+| `sonar-quality-gate` | string | no | `'true'` | Wait for quality gate result |
+| `sonar-branch` | string | no | `${{ github.head_ref \|\| github.ref_name }}` | Branch to analyze |
+| `build-tool` | string | no | `'maven'` | Must be `'maven'` |
+
+**Secrets required:** `NOVA_SONAR_TOKEN`.
+
+#### `reusable-sonarcloud-gradle.yml`
+Same purpose for Gradle projects. Same inputs as the Maven variant (with `build-tool` defaulting to `'gradle'`).
+
+#### `reusable-owasp-check.yml`
+Runs OWASP Dependency-Check against the project, producing an HTML report of known CVEs in transitive dependencies.
+
+#### `reusable-sbom.yml`
+Generates a CycloneDX SBOM for the consumer project using [anchore/sbom-action](https://github.com/anchore/sbom-action) (replaces the deprecated `anchore/syft-action@v1`).
+
+#### `codeql.yml`
+Runs GitHub CodeQL static analysis on every push and pull request. Backed by the `github/codeql-action` SHA-pinned to commit `e0647621c2984b5ed2f768cb892365bf2a616ad1`.
+
+### Publish Pipelines
+
+#### `reusable-release-publish.yml` (Gradle — official, Sprint 3+)
+Triggered by a `vX.Y.Z` tag push (created by release-please). Validates the tag format, syncs the version into `gradle.properties`, resolves package visibility, and publishes to GitHub Packages.
+
+This is the **official** publication path for Gradle projects as of Sprint 3. It replaces the deprecated `reusable-publish-gradle.yml`.
+
+#### `reusable-release-maven-publish.yml` (Maven — official, Sprint 3+)
+Same as above, for Maven projects. Validates the tag format (with environment-variable indirection to prevent CodeQL code-injection false positives), syncs the version into `pom.xml`, and publishes to GitHub Packages.
+
+This is the **official** publication path for Maven projects as of Sprint 3. It replaces the deprecated `reusable-publish-maven.yml`.
+
+#### `reusable-publish-gradle.yml` / `reusable-publish-maven.yml` (DEPRECATED)
+> **Deprecated as of 2026-07-21.** Use `reusable-release-publish.yml` (Gradle) or `reusable-release-maven-publish.yml` (Maven) instead. These workflows remain in the repository for legacy consumer projects that have not yet migrated.
+
+### Release Orchestration
+
+#### `reusable-release-please.yml`
+Runs [release-please](https://github.com/googleapis/release-please) from Google to automate Conventional Commits-based releases. On every push to the target branch, it analyzes commit history, opens (or updates) a release PR that bumps the version, updates `CHANGELOG.md`, and merges it to create a GitHub Release and a `vX.Y.Z` tag. The tag then triggers the publish pipeline.
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `release-type` | string | no | `'java'` | One of `java`, `gradle`, `maven`, `python`, `node`, `go`, `rust`, `php`, `ruby`, `elixir` |
+| `package-name` | string | no | repo name | Package name (for multi-package repos) |
+| `config-file` | string | no | `'.release-please-config.json'` | Path to release-please config |
+| `manifest-file` | string | no | `''` | Path to release-please manifest (multi-repo) |
+| `node-version` | string | no | `'20'` | Node.js version |
+| `target-branch` | string | no | `'main'` | Target branch for release PRs |
+
+**Secrets required:** `GH_TOKEN` (with `contents:write` and `pull-requests:write`).
+
+### Standalone Workflows
+
+These workflows are not reusable. They run directly in this repository.
+
+#### `nvd-mirror-update.yml`
+Scheduled weekly rebuild of the shared OWASP dependency-check NVD database. Produces an H2 + JSON mirror committed to the `nvd-mirror` tag. All `reusable-owasp-check.yml` consumers point to this tag to share a single, fast database.
+
+#### `codeql.yml`
+Scheduled and pull-request-triggered CodeQL scan of this repository's own workflows and composite actions.
+
+#### `publish-on-tag.yml`
+Local caller that invokes `reusable-release-publish.yml` when a `vX.Y.Z` tag is pushed. Lives in this repository as a reference pattern for consumer repositories.
+
+## Available Composite Actions
+
+| Action | Purpose |
+|---|---|
+| `nova-setup-java` | JDK setup with Gradle/Maven dependency cache and build-file validation |
+| `nova-setup-node` | Node.js setup with `node_modules` cache and `npm ci` |
+| `nova-setup-gpg` | GPG key import for artifact signing (inputs only; no `secrets.*` access) |
+| `nova-resolve-token` | Resolves a short-lived installation token for a GitHub App |
+| `nova-gather-facts` | Collects repository facts (visibility, default branch, languages) for downstream jobs |
+| `nova-validate-build` | Validates `pom.xml` / `gradle.properties` / `package.json` existence and required fields |
+| `nova-publish-aggregator` | Aggregates multi-module publish outputs for GitHub Packages |
+
+All composite actions are SHA-pinned to the same canonical commit as the workflows (`300f6695c82197f50b2cfa0831bd146ed549a279`).
+
+## Pester Test Suite
+
+A 148-test Pester 5.7.1 suite covers workflow structure, input surfaces, security-critical patterns (env-var indirection, SHA pinning), and migrations.
+
+```powershell
+$env:PSModulePath = "$env:USERPROFILE\Documents\PowerShell\Modules;" + $env:PSModulePath
+Import-Module Pester -RequiredVersion 5.7.1
+Invoke-Pester ./tests
+```
+
+| Test file | Coverage |
+|---|---|
+| `apply-nova-labels.Tests.ps1` | Operator script for `apply-nova-labels.ps1` (Scheme B labels) |
+| `apply-nova-metadata.Tests.ps1` | Operator script for `apply-nova-metadata.ps1` |
+| `migrations.Tests.ps1` | Migration bundle structure and content |
+| `nova-resolve-token.Tests.ps1` | GitHub App token resolution action |
+| `reusable-package-retention.Tests.ps1` | SNAPSHOT cleanup workflow |
+| `reusable-sonarcloud.Tests.ps1` | SonarCloud workflow input surface, env-var wiring, SHA-pinning |
+| `rotate-nova-tokens.Tests.ps1` | Operator script for `rotate-nova-tokens.ps1` |
+
+## PowerShell Operator Scripts
+
+Operator utilities for managing the multi-repo Nova ecosystem. Run from a workstation with `gh` CLI authenticated against the `ahincho` organization.
+
+| Script | Purpose |
+|---|---|
+| `scripts/apply-nova-labels.ps1` | Apply Scheme B labels across 32 consumer repositories |
+| `scripts/apply-nova-metadata.ps1` | Apply repository topics, description, and homepage |
+| `scripts/rotate-nova-tokens.ps1` | Phase 1 issue + Phase 2 delete of `NOVA_RELEASE_PAT` secrets |
+
+## Migrations
+
+`release-please` migration bundles for consumer repositories that pre-date the current release model. Apply with the `gh` CLI:
+
+```bash
+gh repo clone nova-bom-lote-f ./nova-bom
+cp -r ./.github/workflows/* ./nova-bom/.github/workflows/
+cd ./nova-bom
+git checkout -b chore/migrate-to-release-please
+git commit -am "chore: migrate to release-please"
+gh pr create --base main --title "chore: migrate to release-please"
+```
+
+Available bundles:
+
+- `nova-bom-lote-f`
+- `nova-java-spring-boot-parent-lote-f`
+
+## Security Posture
+
+| Layer | Status | Reference |
+|---|---|---|
+| CodeQL static analysis | 0 alerts (medium or higher) | Lote Q, July 2026 |
+| Action SHA pinning | 14 actions, 68 `uses:` refs | Lote Q, July 2026 |
+| Code-injection (env var pattern) | 0 alerts (was 7) | Lote Q, July 2026 |
+| Dependabot | Active, weekly schedule, version updates enabled | `dependabot.yml` |
+| Branch protection on `main` | 1 review, enforce_admins, CodeQL required | Repo settings |
+| Branch protection on `dev` | 1 review, CodeQL required (no enforce_admins) | Repo settings |
+| Secret scanning | Enabled with push protection | Repo settings |
+
+## Required Secrets and Variables
+
+Each consumer repository needs the following secrets (items marked _optional_ are only required for the workflows that consume them):
+
+| Secret | Consumed by | Required |
+|---|---|---|
+| `GITHUB_TOKEN` | All publish workflows | Auto-provided by GitHub |
+| `NOVA_SONAR_TOKEN` | `reusable-sonarcloud-{maven,gradle}.yml` | Optional (only if SonarCloud is enabled) |
+| `NOVA_APP_ID` / `NOVA_APP_PRIVATE_KEY` | `nova-resolve-token` | Optional (only for short-lived App tokens) |
+
+Repository variables (not secrets):
+
+| Variable | Consumed by | Default | Description |
+|---|---|---|---|
+| `NOVA_PACKAGE_VISIBILITY` | `reusable-publish-*` (deprecated) | `'public'` | Default package visibility (overridable by `visibility` input) |
+
+## Consumer Repository Example
+
+A complete caller workflow for a Gradle library consumer:
+
+### `.github/workflows/ci.yml`
+
+```yaml
+name: CI
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
   push:
-    branches: [main]
+    branches: [main, dev]
+
+permissions: {}
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
-    uses: ahincho/nova-devops/.github/workflows/reusable-build-gradle.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-build-gradle.yml@300f6695c82197f50b2cfa0831bd146ed549a279
+    with:
+      java-version: '25'
     secrets: inherit
 
   sonar:
     if: github.event_name == 'pull_request'
-    uses: ahincho/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-sonarcloud-gradle.yml@300f6695c82197f50b2cfa0831bd146ed549a279
     with:
       sonar-org: ahincho
-      sonar-project-key: ahincho_nova-java-spring-boot-<nombre-corto>
+      sonar-project-key: ahincho_nova-<name>
+      java-version: '25'
     secrets: inherit
+
+  owasp:
+    uses: ahincho/nova-devops/.github/workflows/reusable-owasp-check.yml@300f6695c82197f50b2cfa0831bd146ed549a279
+    with:
+      java-version: '25'
 ```
 
-### `release-please.yml`
+### `.github/workflows/release-please.yml`
 
 ```yaml
 name: Release Please
@@ -513,14 +336,21 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   release-please:
-    uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@300f6695c82197f50b2cfa0831bd146ed549a279
+    with:
+      release-type: java
+      package-name: nova-<name>
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### `publish-on-tag.yml`
+### `.github/workflows/publish-on-tag.yml`
 
 ```yaml
 name: Publish on Tag
@@ -531,7 +361,7 @@ on:
 
 jobs:
   publish:
-    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@main
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@300f6695c82197f50b2cfa0831bd146ed549a279
     secrets: inherit
 ```
 
@@ -541,7 +371,7 @@ jobs:
 {
   "packages": {
     ".": {
-      "package-name": "nova-java-spring-boot-<nombre-corto>",
+      "package-name": "nova-<name>",
       "release-type": "java",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
@@ -560,137 +390,44 @@ jobs:
 }
 ```
 
-> El manifest se actualiza automáticamente en cada release PR. Inicialmente contiene la versión de partida (`0.1.0`).
+## Library Ecosystem
 
----
-
-## Librerías del Ecosistema
-
-| Librería | Repositorio | Build Tool | Sonar Project Key |
+| Library | Repo | Build Tool | Sonar Project Key |
 |---|---|---|---|
-| mask-utils | `nova-mask-utils` | Maven | `<org>_nova-mask-utils` |
-| api-standard | `nova-api-standard` | Gradle KTS | `<org>_nova-api-standard` |
-| date-utils | `nova-date-utils` | Gradle KTS | `<org>_nova-date-utils` |
-| mapper-utils | `nova-mapper-utils` | Gradle KTS | `<org>_nova-mapper-utils` |
+| mask-utils | `nova-mask-utils` | Maven | `ahincho_nova-mask-utils` |
+| api-standard | `nova-api-standard` | Gradle KTS | `ahincho_nova-api-standard` |
+| date-utils | `nova-date-utils` | Gradle KTS | `ahincho_nova-date-utils` |
+| mapper-utils | `nova-mapper-utils` | Gradle KTS | `ahincho_nova-mapper-utils` |
+| spring-boot-parent | `nova-java-spring-boot-parent` | Gradle KTS | `ahincho_nova-java-spring-boot-parent` |
+| bom | `nova-bom` | Maven | `ahincho_nova-bom` |
 
-## Secretos Necesarios
+## Branch Protection Rules
 
-Cada repositorio de librería debe tener configurados los siguientes secretos (los marcados como **opcional** solo se requieren si se usa el workflow que los consume):
+### `main`
+- 1 approving review
+- CODEOWNERS enforcement
+- Dismiss stale approvals on push
+- `enforce_admins: true`
+- Required status check: `CodeQL Advanced / analyze (actions)` (strict)
 
-| Secreto | Usado por | Descripción |
-|---|---|---|
-| `GITHUB_TOKEN` | todos los workflows | Token automático de GitHub (disponible por defecto, no requiere configuración) |
-| `NOVA_SONAR_TOKEN` *(opcional)* | `reusable-sonarcloud-maven.yml` / `reusable-sonarcloud-gradle.yml` | Token de autenticación de SonarCloud. Solo requerido si se activa el análisis de SonarCloud |
+### `dev`
+- 1 approving review
+- CODEOWNERS enforcement
+- Dismiss stale approvals on push
+- `enforce_admins: false`
+- Required status check: `CodeQL Advanced / analyze (actions)` (strict)
 
-### Variables de Repositorio (no secretos)
+## Dependabot Configuration
 
-| Variable | Usado por | Default | Descripción |
-|---|---|---|---|
-| `NOVA_PACKAGE_VISIBILITY` | `reusable-publish-{gradle,maven}.yml` | `'public'` | Visibilidad por defecto del paquete (puede ser sobreescrita por el input `visibility` del workflow) |
+Dependabot runs weekly (Monday 06:00 UTC) with two package ecosystems:
 
----
+- **github-actions** — version updates for `actions/*`, `github/*` (actions-major-bump group) and `gradle/actions`, `googleapis/*`, `anchore/*`, `sonarsource/*`, `github/codeql-action` (third-party-actions group)
+- **npm** — version updates for `@commitlint/*` and `lefthook` (major updates ignored)
 
-## Composite Actions
-
-Las composite actions se invocan desde los reusable workflows o directamente desde workflows llamadores. Se referencian con la sintaxis:
-
-```yaml
-- uses: ahincho/nova-devops/.github/actions/<nombre>@<ref>
-```
-
-Donde `<ref>` puede ser `main` (para desarrollo) o un tag SemVer (ej: `v1.0.0`) para releases inmutables.
-
-### Composite Action: `nova-setup-java`
-
-Setup de Java con caché de Gradle/Maven siguiendo convenciones de Nova.
-
-**Inputs:**
-
-| Input | Default | Descripción |
-|---|---|---|
-| `java-version` | `'25'` | Versión de Java |
-| `build-tool` | `'gradle'` | Build tool: `maven` o `gradle` |
-| `distribution` | `'temurin'` | Distribución JDK |
-
-**Pasos internos:**
-
-1. `actions/setup-java@v4` con `cache: gradle|maven` según `build-tool`.
-2. Validación: falla si no existe ni `gradle.properties` ni `pom.xml`.
-3. `gradle/actions/setup-gradle@v4` (solo si `build-tool=gradle`) con `cache-read-only` en PRs.
-
-**Ejemplo:**
-
-```yaml
-- uses: ahincho/nova-devops/.github/actions/nova-setup-java@v1
-  with:
-    java-version: '25'
-    build-tool: gradle
-```
-
-### Composite Action: `nova-setup-node`
-
-Setup de Node.js con caché de `node_modules` e instalación de dependencias.
-
-**Inputs:**
-
-| Input | Default | Descripción |
-|---|---|---|
-| `node-version` | `'20'` | Versión de Node.js |
-| `package-manager` | `'npm'` | Package manager: `npm`, `pnpm`, `yarn` |
-| `cache-key-prefix` | `''` | Prefijo para la key del cache (útil en monorepos) |
-
-**Pasos internos:**
-
-1. `actions/setup-node@v4`.
-2. `actions/cache@v4` para `node_modules` y `.npm`.
-3. `npm ci` (si hay `package-lock.json`) o `npm install`.
-
-**Ejemplo:**
-
-```yaml
-- uses: ahincho/nova-devops/.github/actions/nova-setup-node@v1
-  with:
-    node-version: '20'
-```
-
-### Composite Action: `nova-setup-gpg`
-
-Import de clave GPG para firma de artefactos (preparado, **clave aún no generada** — ver `docs/06-semantic-versioning-en-java.md` sección 10.3).
-
-> **Aclaración técnica:** las composite actions NO tienen acceso a `secrets.*` de GitHub Actions. Los secrets deben pasarse como `inputs` desde el workflow que invoca la action.
-
-**Inputs:**
-
-| Input | Default | Descripción |
-|---|---|---|
-| `gpg-signing-key-id` | `''` | Fingerprint de la clave GPG |
-| `gpg-signing-key` | `''` | Clave privada ASCII-armored (pasada como input) |
-| `gpg-signing-password` | `''` | Passphrase (si aplica) |
-| `fail-on-missing` | `'false'` | Si es `true`, falla cuando los inputs están vacíos |
-
-**Outputs:**
-
-| Output | Descripción |
-|---|---|
-| `gpg-key-imported` | `true`/`false` — si la clave fue importada |
-| `gpg-key-skipped` | `true`/`false` — si se saltó la configuración |
-
-**Uso desde un reusable workflow (que SÍ tiene acceso a `secrets`):**
-
-```yaml
-steps:
-  - uses: ahincho/nova-devops/.github/actions/nova-setup-gpg@v1
-    with:
-      gpg-signing-key-id: ${{ secrets.GPG_SIGNING_KEY_ID }}
-      gpg-signing-key: ${{ secrets.GPG_SIGNING_KEY }}
-      gpg-signing-password: ${{ secrets.GPG_SIGNING_PASSWORD }}
-      fail-on-missing: 'true'
-```
-
-**Comportamiento por defecto (`fail-on-missing='false'`):** si los inputs están vacíos, emite un `::notice::` y continúa sin error.
+Configuration lives in `.github/dependabot.yml`. Group definitions use only schema-valid keys (`applies-to`, `patterns`); non-schema fields (e.g. `update-strategy`) are intentionally omitted.
 
 ---
 
-## Versionado de las Composite Actions
-
-Este repositorio **no usa Semantic Versioning** (ver [Política de Versionado y Branches](#política-de-versionado-y-branches) arriba). Las composite actions se referencian siempre con `@main` (HEAD) o, para máxima inmutabilidad y reproducibilidad de un run específico, con un commit SHA: `@<commit-sha>`.
+**Maintained by:** `ahincho` — see `CODEOWNERS` for review routing.
+**CHANGELOG:** see `CHANGELOG.md` for release history (Lote A through Lote Q).
+**Plan of record:** see `nova-devops.md` for the active working plan and bitácora.
