@@ -1,0 +1,19 @@
+# CODEOWNERS - automatic review assignment for nova-devops
+# Last matching pattern wins.
+# Workflows and composite actions here ship to ~30 downstream repos, so
+# every change needs a maintainer review before merge.
+
+# Default owner for everything in this repo
+*                                       @ahincho
+
+# Security-sensitive areas require explicit attention
+/.github/workflows/reusable-publish-*    @ahincho
+/.github/workflows/reusable-release-*   @ahincho
+/.github/workflows/reusable-owasp-*     @ahincho
+/.github/workflows/codeql.yml           @ahincho
+/.github/dependabot.yml                 @ahincho
+/.github/actions/                       @ahincho
+/docs/owasp-suppressions.json           @ahincho
+/scripts/rotate-nova-tokens.ps1         @ahincho
+/scripts/apply-nova-metadata.ps1        @ahincho
+/scripts/apply-nova-labels.ps1          @ahincho

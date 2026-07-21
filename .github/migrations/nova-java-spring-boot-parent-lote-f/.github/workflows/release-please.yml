@@ -1,0 +1,25 @@
+﻿name: Release Please
+
+# Triggered on every push to main. Creates/updates a release PR with version
+# bumps based on Conventional Commits. Merging the release PR creates a vX.Y.Z
+# tag, which triggers publish-on-tag.yml to deploy to GitHub Packages.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# release-please creates/updates the release PR and pushes the version tag on merge.
+permissions:
+  contents: write
+  pull-requests: write
+
+# release-please is idempotent on rerun, safe to cancel stale runs.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-please:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-please.yml@main # pinned to stable; see CHANGELOG Lote P
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

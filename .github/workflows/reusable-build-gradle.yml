@@ -1,3 +1,7 @@
+﻿# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
 name: Reusable Build and Tests (Gradle)
 
 on:
@@ -15,55 +19,55 @@ on:
           dependencies published from OTHER Nova repos. Optional; falls back
           to NOVA_RELEASE_PAT (already proven to have this scope) if unset.
         required: false
+      NOVA_PLATFORM_APP_ID:
+        description: 'GitHub App ID (numeric). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+      NOVA_PLATFORM_APP_PRIVATE_KEY:
+        description: 'GitHub App private key (PEM contents, multi-line). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+# Read-only: just runs the build/test pipeline.
+permissions:
+  contents: read
 
+# Per-caller concurrency: a PR pushing 3 commits only sees the latest build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: gradle
 
       - name: Nova Validate Build
-        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           min-java-version: ${{ inputs.java-version }}
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           version-source: gradle-properties
 
-      - name: Resolve packages read token
+      - name: Nova Resolve Token
         id: resolve_token
-        env:
-          TOKEN_A: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
-          TOKEN_B: ${{ secrets.NOVA_RELEASE_PAT }}
-          TOKEN_C: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Pick the first non-empty token (NOVA_PACKAGES_READ_TOKEN > NOVA_RELEASE_PAT > GITHUB_TOKEN).
-          # GitHub Actions expression `secrets.X || secrets.Y` doesn't short-circuit
-          # the way bash `||` does; we do it in shell instead. Without this step,
-          # the expression evaluates to "1" (one char) when secrets.NOVA_PACKAGES_READ_TOKEN
-          # is unset (treated as null), even if secrets.NOVA_RELEASE_PAT has a value.
-          # Discovered in the notifications module publish workflow (commit bb67ea7).
-          if [ -n "${TOKEN_A}" ]; then
-            echo "value=${TOKEN_A}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${TOKEN_B}" ]; then
-            echo "value=${TOKEN_B}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=${TOKEN_C}" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
+        with:
+          app-id: ${{ secrets.NOVA_PLATFORM_APP_ID }}
+          app-private-key: ${{ secrets.NOVA_PLATFORM_APP_PRIVATE_KEY }}
 
       - name: Build and Test
         env:
@@ -91,7 +95,7 @@ jobs:
 
       - name: Upload Test Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
         with:
           name: test-reports
           path: |
@@ -99,7 +103,7 @@ jobs:
 
       - name: Upload JavaDoc
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
         with:
           name: javadoc
           path: |

@@ -1,3 +1,7 @@
+﻿# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
 name: Reusable OWASP Dependency Check
 
 on:
@@ -67,29 +71,50 @@ on:
           dependencies published from OTHER Nova repos (Maven only). Optional;
           without it, cross-repo GitHub Packages reads get a 401.
         required: false
+      NOVA_PLATFORM_APP_ID:
+        description: 'GitHub App ID (numeric). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+      NOVA_PLATFORM_APP_PRIVATE_KEY:
+        description: 'GitHub App private key (PEM contents, multi-line). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+# Read-only: NVD data restore + dependency-check analysis; report is uploaded
+# as an artifact (no GITHUB_TOKEN writes).
+permissions:
+  contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   owasp-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
 
       - name: Make gradlew executable
         if: inputs.build-tool == 'gradle'
         run: chmod +x ./gradlew
 
+      - name: Nova Resolve Token
+        id: resolve_token
+        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
+        with:
+          app-id: ${{ secrets.NOVA_PLATFORM_APP_ID }}
+          app-private-key: ${{ secrets.NOVA_PLATFORM_APP_PRIVATE_KEY }}
+
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
-          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          packages-read-token: ${{ steps.resolve_token.outputs.value }}
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
 
       - name: Get date bucket for NVD cache
         id: nvd-date
@@ -191,7 +216,7 @@ jobs:
       # caches nothing useful.
       - name: Cache NVD Database (same-branch fast path)
         id: local-cache
-        uses: actions/cache@v4
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
         with:
           path: ~/.dependency-check-data
           key: ${{ runner.os }}-nvd-${{ steps.nvd-date.outputs.date }}
@@ -226,10 +251,10 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           NOVA_OWASP_FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
           NOVA_OWASP_SUPPRESSION_FILE: ${{ inputs.suppression-file }}
-          # Falls back to NOVA_RELEASE_PAT (already proven to have packages:read,
-          # see docs/java/06-semantic-versioning-en-java.md §11.9.17) so consumers
-          # don't need a brand-new dedicated secret just for this.
-          NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          # Resolved by the Nova Resolve Token composite action at the top of
+          # this job (see nova-resolve-token/action.yml). Priority:
+          # NOVA_PACKAGES_READ_TOKEN > NOVA_RELEASE_PAT > GITHUB_TOKEN.
+          NOVA_PACKAGES_READ_TOKEN: ${{ steps.resolve_token.outputs.value }}
           # Analyzer override contract for Gradle consumers: the consumer's
           # build.gradle.kts reads this via System.getenv("NOVA_OWASP_ANALYZER_OVERRIDE")
           # and re-enables the listed analyzers on top of its default-off set.
@@ -386,7 +411,7 @@ jobs:
 
       - name: Upload OWASP Report
         if: inputs.upload-report && always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
         with:
           name: owasp-dependency-check-report
           path: |

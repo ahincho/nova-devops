@@ -1,0 +1,56 @@
+﻿name: Publish on Tag (Maven)
+
+# Triggered by tag push (vX.Y.Z) created by release-please after merging a
+# release PR. Deploys the parent POM to GitHub Packages.
+#
+# This repo CONSUMES nova-bom from another Nova repo (see the <nova-bom.version>
+# property in pom.xml), so the NOVA_PACKAGES_READ_TOKEN is REQUIRED for
+# mvn deploy to resolve the nova-bom dependency. The token is forwarded to
+# the reusable workflow via the secrets: block (secrets context is not
+# allowed in `with:` for reusable workflow calls).
+#
+# Replaces the DEPRECATED `.github/workflows/publish.yml` which inlined a
+# manual mvn deploy + custom settings.xml workaround for the cross-repo read.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      java-version:
+        description: 'Java version override. Default: 25'
+        required: false
+        type: string
+        default: '25'
+      dry-run:
+        description: 'Dry-run: deploy to local file:// repo for verification'
+        required: false
+        type: string
+        default: 'false'
+
+# Pushes the artifact to GitHub Packages via the reusable workflow.
+permissions:
+  contents: read
+  packages: write
+
+# Single slot per tag so a retag does not race itself; do NOT cancel because
+# the publisher is destructive (could leave a half-published release).
+concurrency:
+  group: publish-on-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-maven-publish.yml@main # pinned to stable; see CHANGELOG Lote P
+    with:
+      java-version: ${{ github.event.inputs.java-version || '25' }}
+      dry-run: ${{ github.event.inputs.dry-run || 'false' }}
+      # packages-read-token is wired via the secrets: block below (NOVA_PACKAGES_READ_TOKEN)
+      # because secrets context is not allowed in `with:` for reusable workflow calls.
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # REQUIRED: this repo consumes nova-bom from a different repo (the
+      # <nova-bom.version> property in pom.xml). Without this secret, the
+      # reusable falls back to github.token which CANNOT read packages from
+      # a different repo (HTTP 401 on mvn deploy).
+      NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}

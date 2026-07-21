@@ -1,0 +1,52 @@
+﻿name: Publish on Tag (Maven)
+
+# Triggered by tag push (vX.Y.Z) created by release-please after merging a
+# release PR. Deploys ALL Maven modules of this multi-module BOM to GitHub
+# Packages. Replaces the DEPRECATED `.github/workflows/publish.yml` which used
+# `ahincho/nova-devops/.github/workflows/reusable-publish-maven.yml@main`.
+#
+# This wrapper directly calls the Maven variant of the reusable workflow
+# (the nova-devops `publish-on-tag.yml` wrapper has a gradle default for the
+# push trigger that doesn't apply here - nova-bom is Maven-only).
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      java-version:
+        description: 'Java version override. Default: 25'
+        required: false
+        type: string
+        default: '25'
+      dry-run:
+        description: 'Dry-run: deploy to local file:// repo for verification'
+        required: false
+        type: string
+        default: 'false'
+
+# Pushes the artifact to GitHub Packages via the reusable workflow.
+permissions:
+  contents: read
+  packages: write
+
+# Single slot per tag so a retag does not race itself; do NOT cancel because
+# the publisher is destructive (could leave a half-published release).
+concurrency:
+  group: publish-on-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-maven-publish.yml@main # pinned to stable; see CHANGELOG Lote P
+    with:
+      java-version: ${{ github.event.inputs.java-version || '25' }}
+      dry-run: ${{ github.event.inputs.dry-run || 'false' }}
+      # packages-read-token is wired via the secrets: block below (NOVA_PACKAGES_READ_TOKEN)
+      # because secrets context is not allowed in `with:` for reusable workflow calls.
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # nova-bom does NOT consume other repos (it's a leaf for the BOM hierarchy),
+      # so the cross-repo read token is optional. If unset, the reusable falls back
+      # to github.token (which works for same-repo reads, sufficient here).
+      NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}

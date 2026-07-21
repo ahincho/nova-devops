@@ -1,0 +1,17 @@
+{
+  "$schema": "https://github.com/googleapis/release-please-config.json",
+  "release-type": "maven",
+  "bump-minor-pre-major": false,
+  "bump-patch-for-minor-pre-major": false,
+  "include-component-in-tag": false,
+  "skip-github-release": true,
+  "packages": {
+    ".": {
+      "package-name": "nova-spring-boot-parent",
+      "release-type": "maven",
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": false,
+      "include-component-in-tag": false
+    }
+  }
+}

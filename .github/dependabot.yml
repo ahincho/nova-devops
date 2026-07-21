@@ -1,0 +1,49 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      actions-major-bump:
+        applies-to: version-updates
+        patterns:
+          - "actions/*"
+          - "github/*"
+        update-strategy: "in-range"
+      third-party-actions:
+        applies-to: version-updates
+        patterns:
+          - "gradle/actions"
+          - "googleapis/*"
+          - "anchore/*"
+          - "sonarsource/*"
+          - "github/codeql-action"
+        update-strategy: "in-range"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels:
+      - "dependencies"
+    ignore:
+      - dependency-name: "@commitlint/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lefthook"
+        update-types: ["version-update:semver-major"]

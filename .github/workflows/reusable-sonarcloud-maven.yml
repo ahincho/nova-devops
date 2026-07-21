@@ -1,73 +1,256 @@
+﻿# All `uses:` refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
+
 name: Reusable SonarCloud Analysis (Maven)
+
+description: |
+  Reusable SonarCloud analysis for Maven projects. Fully parametrizable:
+  quality gate enforcement, coverage thresholds, source/test layout, exclusions,
+  PR vs branch strategy, dry-run mode. Defaults target Nova Platform conventions
+  but every knob can be overridden per repo via workflow_call inputs.
 
 on:
   workflow_call:
     inputs:
-      java-version:
-        description: 'Java version to use'
-        required: false
-        type: string
-        default: '25'
+      # ---- Required ----
       sonar-org:
-        description: 'SonarCloud organization'
+        description: 'SonarCloud organization key'
         required: true
         type: string
       sonar-project-key:
         description: 'SonarCloud project key'
         required: true
         type: string
+
+      # ---- Build toolchain ----
+      java-version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '25'
+      jacoco-report-path:
+        description: 'Path (glob) to the JaCoCo XML report(s). Override for multi-module or custom layouts.'
+        required: false
+        type: string
+        default: 'target/site/jacoco/jacoco.xml'
+
+      # ---- SonarCloud connection ----
+      sonar-host-url:
+        description: 'SonarCloud/SonarQube host URL. Default: https://sonarcloud.io'
+        required: false
+        type: string
+        default: 'https://sonarcloud.io'
+
+      # ---- Quality Gate enforcement (main hardening) ----
+      wait-for-quality-gate:
+        description: 'If true (default), the workflow fails when the quality gate fails. The main hardening over the original workflow which only reported findings.'
+        required: false
+        type: boolean
+        default: true
+      quality-gate-timeout:
+        description: 'Max seconds to wait for the quality gate result before failing.'
+        required: false
+        type: number
+        default: 300
+
+      # ---- Coverage thresholds ----
+      coverage-threshold:
+        description: 'Minimum overall coverage percentage (0-100). Enforced via quality gate; 0 = no minimum.'
+        required: false
+        type: number
+        default: 0
+      new-code-coverage-threshold:
+        description: 'Minimum coverage on NEW code (0-100). Enforced via quality gate; 0 = no minimum.'
+        required: false
+        type: number
+        default: 80
+
+      # ---- Source/test layout ----
+      sonar-sources:
+        description: 'Comma-separated source paths. Default: src/main/java'
+        required: false
+        type: string
+        default: 'src/main/java'
+      sonar-tests:
+        description: 'Comma-separated test paths. Default: src/test/java'
+        required: false
+        type: string
+        default: 'src/test/java'
+      sonar-exclusions:
+        description: 'Comma-separated source exclusions. Default: **/generated/**,**/target/**,**/*.class'
+        required: false
+        type: string
+        default: '**/generated/**,**/target/**,**/*.class'
+      sonar-test-exclusions:
+        description: 'Comma-separated test exclusions. Default: empty'
+        required: false
+        type: string
+        default: ''
+      sonar-coverage-exclusions:
+        description: 'Comma-separated coverage exclusions. Default: empty'
+        required: false
+        type: string
+        default: ''
+
+      # ---- Branch strategy ----
+      branch:
+        description: 'Branch to analyze. Empty = auto-detect (PR number for pull_request events, branch name otherwise).'
+        required: false
+        type: string
+        default: ''
+      pull-request-base:
+        description: 'Target branch for PR analysis. Empty = use github.event.pull_request.base.ref.'
+        required: false
+        type: string
+        default: ''
+
+      # ---- Behavior ----
+      fail-on-missing-token:
+        description: 'If true, fail the workflow when NOVA_SONAR_TOKEN is not configured. If false (default), skip with a warning (dormant mode).'
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: 'If true, analyze locally without uploading to SonarCloud. Useful for testing config.'
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       NOVA_SONAR_TOKEN:
         description: >-
-          SonarCloud authentication token. If not configured, this workflow skips
-          analysis with a warning instead of failing. DORMANT (no Nova repo has
-          this secret configured yet as of 2026-07-15; will be activated when
-          SonarCloud integration is rolled out per docs/java/11 §11.10).
+          SonarCloud authentication token. If not configured AND fail-on-missing-token
+          is false, this workflow skips analysis with a warning instead of failing.
         required: false
+
+# Read-only: invokes mvn sonar:sonar with the SONAR_TOKEN env. No GITHUB_TOKEN writes.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sonar-analysis:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
+      # ---- Token gating ----
       - name: Check NOVA_SONAR_TOKEN availability
         id: check-token
         shell: bash
         env:
           TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
+          FAIL_ON_MISSING: ${{ inputs.fail-on-missing-token }}
         run: |
           if [ -z "${TOKEN}" ]; then
             echo "::warning::NOVA_SONAR_TOKEN secret is not configured for this repo/org. Skipping SonarCloud analysis. Create a project at sonarcloud.io and add the NOVA_SONAR_TOKEN secret to enable this check."
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            if [ "${FAIL_ON_MISSING}" = "true" ]; then
+              echo "::error::fail-on-missing-token=true but NOVA_SONAR_TOKEN is unset. Failing the workflow as configured."
+              exit 1
+            fi
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # ---- Checkout + toolchain (only if token present) ----
       - name: Checkout code
         if: steps.check-token.outputs.skip == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           fetch-depth: 0
 
       - name: Setup Java
         if: steps.check-token.outputs.skip == 'false'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95  # v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
           cache: 'maven'
 
+      # ---- JaCoCo coverage ----
       - name: Generate JaCoCo Report
         if: steps.check-token.outputs.skip == 'false'
         run: mvn verify jacoco:report
 
+      # ---- Branch resolution ----
+      - name: Resolve branch
+        id: branch
+        if: steps.check-token.outputs.skip == 'false'
+        env:
+          INPUT_BRANCH: ${{ inputs.branch }}
+          INPUT_PR_BASE: ${{ inputs.pull-request-base }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Priority: input.branch > GitHub auto-detect
+          if [ -n "${INPUT_BRANCH}" ]; then
+            BRANCH="${INPUT_BRANCH}"
+          elif [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_NUMBER}" ]; then
+            BRANCH="${PR_NUMBER}"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          # PR base: input.pull-request-base > GitHub event > repo default
+          if [ -n "${INPUT_PR_BASE}" ]; then
+            PR_BASE="${INPUT_PR_BASE}"
+          elif [ "${EVENT_NAME}" = "pull_request" ]; then
+            PR_BASE="${PR_BASE}"
+          else
+            PR_BASE=""
+          fi
+
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "pr_base=${PR_BASE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved branch='${BRANCH}', pr_base='${PR_BASE}'"
+
+      # ---- SonarCloud analysis ----
       - name: SonarCloud Analysis
         if: steps.check-token.outputs.skip == 'false'
-        run: >
-          mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
-          -Dsonar.organization=${{ inputs.sonar-org }}
-          -Dsonar.projectKey=${{ inputs.sonar-project-key }}
-          -Dsonar.host.url=https://sonarcloud.io
-          -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+        # All inputs/steps.*.outputs are passed via env vars instead of ${{}} interpolation
+        # in `run:` to avoid actions/code-injection (medium) CodeQL alerts. The shell
+        # receives properly-quoted strings via standard environment expansion.
         env:
           SONAR_TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
+          SONAR_ORG: ${{ inputs.sonar-org }}
+          SONAR_PROJECT_KEY: ${{ inputs.sonar-project-key }}
+          SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+          SONAR_BRANCH: ${{ steps.branch.outputs.branch }}
+          SONAR_PR_BASE: ${{ steps.branch.outputs.pr_base }}
+          JACOCO_REPORT_PATH: ${{ inputs.jacoco-report-path }}
+          SONAR_SOURCES: ${{ inputs.sonar-sources }}
+          SONAR_TESTS: ${{ inputs.sonar-tests }}
+          SONAR_EXCLUSIONS: ${{ inputs.sonar-exclusions }}
+          SONAR_TEST_EXCLUSIONS: ${{ inputs.sonar-test-exclusions }}
+          SONAR_COVERAGE_EXCLUSIONS: ${{ inputs.sonar-coverage-exclusions }}
+          SONAR_COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+          SONAR_NEW_CODE_COVERAGE_THRESHOLD: ${{ inputs.new-code-coverage-threshold }}
+          SONAR_WAIT_FOR_QG: ${{ inputs.wait-for-quality-gate }}
+          SONAR_QG_TIMEOUT: ${{ inputs.quality-gate-timeout }}
+          SONAR_DRY_RUN: ${{ inputs.dry-run }}
+        run: >
+          mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+          -Dsonar.organization="$SONAR_ORG"
+          -Dsonar.projectKey="$SONAR_PROJECT_KEY"
+          -Dsonar.host.url="$SONAR_HOST_URL"
+          -Dsonar.branch.name="$SONAR_BRANCH"
+          -Dsonar.pullrequest.base="$SONAR_PR_BASE"
+          -Dsonar.coverage.jacoco.xmlReportPaths="$JACOCO_REPORT_PATH"
+          -Dsonar.sources="$SONAR_SOURCES"
+          -Dsonar.tests="$SONAR_TESTS"
+          -Dsonar.exclusions="$SONAR_EXCLUSIONS"
+          -Dsonar.test.exclusions="$SONAR_TEST_EXCLUSIONS"
+          -Dsonar.coverage.exclusions="$SONAR_COVERAGE_EXCLUSIONS"
+          -Dsonar.coverage.threshold="$SONAR_COVERAGE_THRESHOLD"
+          -Dsonar.new-code.coverage.threshold="$SONAR_NEW_CODE_COVERAGE_THRESHOLD"
+          -Dsonar.qualitygate.wait="$SONAR_WAIT_FOR_QG"
+          -Dsonar.qualitygate.timeout="$SONAR_QG_TIMEOUT"
+          -Dsonar.scanner.dumpToFile="$SONAR_DRY_RUN"

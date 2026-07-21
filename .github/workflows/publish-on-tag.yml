@@ -1,15 +1,76 @@
+﻿# All `uses:` refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
+
 name: Publish on Tag
 
 description: |
   Triggered when release-please pushes a tag vX.Y.Z after merging the release PR.
-  Publishes the artifact to GitHub Packages.
+  Thin wrapper that delegates to either `reusable-release-publish.yml` (Gradle)
+  or `reusable-release-maven-publish.yml` (Maven). For workflow_dispatch, the
+  caller selects the build tool via the `build-tool` input (default: gradle).
+  Push (tag) events always use gradle by default — for Maven projects, replace
+  the tag trigger with `workflow_dispatch` or use a per-repo wrapper.
 
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      build-tool:
+        description: 'Build tool (gradle | maven). Default: gradle'
+        required: false
+        type: choice
+        options:
+          - gradle
+          - maven
+        default: gradle
+      java-version:
+        description: 'Java version override. Default: 25'
+        required: false
+        type: string
+        default: '25'
+      dry-run:
+        description: 'Dry-run: deploy to local repo for verification'
+        required: false
+        type: string
+        default: 'false'
+
+# Thin wrapper - needs minimal permissions because the reusable workflow has its own.
+permissions:
+  contents: read
+
+# Single slot per tag so a retag does not race itself; do NOT cancel because
+# the publisher is destructive (could leave a half-published release).
+concurrency:
+  group: publish-on-tag-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
-    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@main
-    secrets: inherit
+  # Gradle path: default for tag push. Skipped when caller selects maven.
+  publish-gradle:
+    name: Publish (Gradle)
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.build-tool != 'maven'
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-publish.yml@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
+    with:
+      java-version: ${{ github.event.inputs.java-version || '25' }}
+      dry-run: ${{ github.event.inputs.dry-run || 'false' }}
+      # packages-read-token is wired via the secrets: block below (NOVA_PACKAGES_READ_TOKEN)
+      # because secrets context is not allowed in `with:` for reusable workflow calls.
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
+
+  # Maven path: only when caller explicitly selects maven via workflow_dispatch.
+  publish-maven:
+    name: Publish (Maven)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build-tool == 'maven'
+    uses: ahincho/nova-devops/.github/workflows/reusable-release-maven-publish.yml@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
+    with:
+      java-version: ${{ github.event.inputs.java-version || '25' }}
+      dry-run: ${{ github.event.inputs.dry-run || 'false' }}
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}

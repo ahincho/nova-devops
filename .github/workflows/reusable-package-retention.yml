@@ -1,0 +1,260 @@
+﻿name: Reusable Package Retention (Maven)
+
+# All `uses:` refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
+
+description: |
+  Cleanup old SNAPSHOT and pre-release Maven package versions on GitHub
+  Packages to reduce storage costs. Designed to be called from each repo
+  that publishes Maven packages via GitHub Packages (typically a wrapper
+  workflow that declares `permissions: packages: write` and triggers this
+  on a schedule or manually).
+
+on:
+  workflow_call:
+    inputs:
+      package-pattern:
+        description: 'Maven coordinate prefix to filter (e.g. pe.edu.nova.java). Use "*" to match all packages owned by this repo.'
+        required: false
+        type: string
+        default: '*'
+      snapshot-retention-days:
+        description: 'Delete SNAPSHOT versions older than this many days'
+        required: false
+        type: number
+        default: 30
+      prerelease-retention-days:
+        description: 'Delete pre-release versions (alpha/beta/rc/milestone/M/RC) older than this many days'
+        required: false
+        type: number
+        default: 90
+      dry-run:
+        description: 'If true, list what would be deleted but do not actually delete'
+        required: false
+        type: boolean
+        default: false
+      fail-on-error:
+        description: 'If true, fail the workflow on any API error. If false, log warnings and continue.'
+        required: false
+        type: boolean
+        default: false
+
+# IMPORTANT: the CALLER workflow must declare `permissions: packages: write`
+# (or higher) in its own permissions block. Reusable workflows inherit the
+# INTERSECTION of caller + reusable permissions, so a caller with
+# `packages: read` would silently downgrade this workflow's effective scope.
+permissions:
+  contents: read
+  packages: write
+
+# Multiple repos may run this in parallel; do not cancel destructive ops.
+concurrency:
+  group: package-retention-${{ github.event.repository.name }}
+  cancel-in-progress: false
+
+jobs:
+  retention:
+    name: Cleanup old Maven versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PACKAGE_PATTERN: ${{ inputs.package-pattern }}
+      SNAPSHOT_RETENTION_DAYS: ${{ inputs.snapshot-retention-days }}
+      PRERELEASE_RETENTION_DAYS: ${{ inputs.prerelease-retention-days }}
+      DRY_RUN: ${{ inputs.dry-run }}
+      FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Cleanup old package versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          #!/usr/bin/env bash
+          set -uo pipefail
+
+          if [ "$FAIL_ON_ERROR" = "true" ]; then
+            set -e
+          fi
+
+          deleted=0
+          kept=0
+          skipped=0
+          errors=0
+
+          # ---------------------------------------------------------------------
+          # Helpers
+          # ---------------------------------------------------------------------
+
+          log_row() {
+            # $1=package $2=version $3=age_days $4=type $5=action
+            printf "| %s | %s | %s | %s | %s |\n" "$1" "$2" "${3}d" "$4" "$5" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          now_epoch=$(date +%s)
+
+          age_days() {
+            # $1 = ISO 8601 timestamp from API
+            local created_epoch
+            created_epoch=$(date -d "$1" +%s 2>/dev/null || echo 0)
+            if [ "$created_epoch" = "0" ]; then
+              echo -1
+              return
+            fi
+            echo $(( (now_epoch - created_epoch) / 86400 ))
+          }
+
+          classify_version() {
+            # Echoes one of: snapshot | prerelease | release
+            local v="$1"
+            if [[ "$v" =~ -SNAPSHOT$ ]]; then
+              echo "snapshot"
+            elif [[ "$v" =~ -(alpha|beta|rc|milestone|M|RC)[-.0-9]*$ ]]; then
+              echo "prerelease"
+            else
+              echo "release"
+            fi
+          }
+
+          should_delete() {
+            # $1=type $2=age_days -> echoes "yes" or "no"
+            local typ="$1"
+            local age="$2"
+            case "$typ" in
+              snapshot)
+                [ "$age" -gt "$SNAPSHOT_RETENTION_DAYS" ] && echo yes || echo no
+                ;;
+              prerelease)
+                [ "$age" -gt "$PRERELEASE_RETENTION_DAYS" ] && echo yes || echo no
+                ;;
+              *)
+                echo no
+                ;;
+            esac
+          }
+
+          safe_api() {
+            # Run gh api; on failure increment errors and continue (unless FAIL_ON_ERROR)
+            if ! output=$("$@" 2>&1); then
+              echo "    [error] $output" >&2
+              errors=$((errors+1))
+              return 1
+            fi
+            echo "$output"
+            return 0
+          }
+
+          # ---------------------------------------------------------------------
+          # Header for step summary
+          # ---------------------------------------------------------------------
+
+          {
+            echo "## Package Retention"
+            echo ""
+            echo "- Repository: \`${REPO}\`"
+            echo "- Package pattern: \`${PACKAGE_PATTERN}\`"
+            echo "- Snapshot retention: ${SNAPSHOT_RETENTION_DAYS} days"
+            echo "- Pre-release retention: ${PRERELEASE_RETENTION_DAYS} days"
+            echo "- Mode: $([ "$DRY_RUN" = "true" ] && echo "DRY-RUN (no deletions)" || echo "LIVE (will delete)")"
+            echo ""
+            echo "| Package | Version | Age | Type | Action |"
+            echo "|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # ---------------------------------------------------------------------
+          # List all Maven packages in this repo
+          # ---------------------------------------------------------------------
+
+          echo "Listing Maven packages in ${REPO} (pattern: ${PACKAGE_PATTERN})..."
+          pkg_list=$(gh api "/repos/${REPO}/packages?package_type=maven" --jq '.[].name' 2>/dev/null || echo "")
+
+          if [ -z "$pkg_list" ]; then
+            echo "  No Maven packages found (or API call failed)."
+            {
+              echo ""
+              echo "_No Maven packages found in this repository._"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # ---------------------------------------------------------------------
+          # For each package, list versions and apply retention policy
+          # ---------------------------------------------------------------------
+
+          while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+
+            # Filter by package-pattern (if not "*")
+            if [ "${PACKAGE_PATTERN}" != "*" ] && [[ "$pkg" != ${PACKAGE_PATTERN}* ]]; then
+              echo "  [skip] ${pkg} (does not match pattern)"
+              continue
+            fi
+
+            echo ""
+            echo "Processing ${pkg}..."
+
+            # List all versions. Each line: id<TAB>name<TAB>created_at
+            versions_json=$(gh api "/repos/${REPO}/packages/maven/${pkg}/versions" \
+              --jq '.[] | [(.id|tostring), .name, .created_at] | @tsv' 2>/dev/null || echo "")
+
+            if [ -z "$versions_json" ]; then
+              echo "    [warn] No versions returned for ${pkg}"
+              continue
+            fi
+
+            while IFS=$'\t' read -r ver_id ver_name ver_created; do
+              [ -z "$ver_id" ] && continue
+
+              ver_type=$(classify_version "$ver_name")
+              ver_age=$(age_days "$ver_created")
+
+              decision=$(should_delete "$ver_type" "$ver_age")
+
+              if [ "$decision" = "yes" ]; then
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "    [dry-run] would delete ${pkg}:${ver_name} (age=${ver_age}d, type=${ver_type})"
+                  log_row "$pkg" "$ver_name" "$ver_age" "$ver_type" "would-delete"
+                else
+                  if gh api -X DELETE "/repos/${REPO}/packages/maven/${pkg}/versions/${ver_id}" >/dev/null 2>&1; then
+                    echo "    [deleted] ${pkg}:${ver_name} (age=${ver_age}d, type=${ver_type})"
+                    log_row "$pkg" "$ver_name" "$ver_age" "$ver_type" "deleted"
+                    deleted=$((deleted+1))
+                  else
+                    echo "    [error] failed to delete ${pkg}:${ver_name}"
+                    log_row "$pkg" "$ver_name" "$ver_age" "$ver_type" "error"
+                    errors=$((errors+1))
+                  fi
+                fi
+              else
+                kept=$((kept+1))
+                # Only log kept versions that are interesting (snapshot/prerelease near expiry)
+                if [ "$ver_type" != "release" ]; then
+                  log_row "$pkg" "$ver_name" "$ver_age" "$ver_type" "keep"
+                fi
+              fi
+            done <<< "$versions_json"
+          done <<< "$pkg_list"
+
+          # ---------------------------------------------------------------------
+          # Footer
+          # ---------------------------------------------------------------------
+
+          {
+            echo ""
+            echo "## Summary"
+            echo ""
+            echo "- Deleted (or would-delete in dry-run): **${deleted}**"
+            echo "- Kept: ${kept}"
+            echo "- Errors: ${errors}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo ""
+          echo "Done. Deleted=${deleted}, Kept=${kept}, Errors=${errors}"
+
+          # Non-zero exit if errors and FAIL_ON_ERROR=true
+          if [ "$errors" -gt 0 ] && [ "$FAIL_ON_ERROR" = "true" ]; then
+            echo "::error::Retention completed with ${errors} error(s)" >&2
+            exit 1
+          fi
