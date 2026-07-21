@@ -1,0 +1,92 @@
+name: 'Resolve Nova Packages Read Token'
+description: >-
+  Pick the best available token for cross-repo GitHub Packages reads.
+  Resolution priority (highest first):
+    1. GitHub App installation token (auto-managed, granular scope). Generated
+       via `actions/create-github-app-token@v2` when `app-id` and `app-private-key`
+       are provided. Best option: scoped per installation, no human rotation.
+    2. GITHUB_TOKEN (auto-provided, but works only for same-repo package reads).
+    3. NOVA_PACKAGES_READ_TOKEN (PAT). Transitional fallback; will be deprecated
+       once GitHub App is installed on all consumer repos.
+    4. NOVA_RELEASE_PAT (PAT). Legacy last-resort fallback; already removed from
+       all callers but retained here to avoid breaking very old consumers.
+  Emits a `::notice::` annotation when a PAT is in use (encourages migration to
+  the GitHub App) and a `::warning::` if NOVA_RELEASE_PAT is selected.
+
+inputs:
+  app-id:
+    description: 'GitHub App ID (numeric). If empty, App auth is skipped.'
+    required: false
+    default: ''
+    type: string
+  app-private-key:
+    description: 'GitHub App private key (PEM contents, multi-line). If empty, App auth is skipped.'
+    required: false
+    default: ''
+    type: string
+  app-owner:
+    description: 'GitHub user/org that owns the App. Required only when app-id/app-private-key are set.'
+    required: false
+    default: 'ahincho'
+    type: string
+
+outputs:
+  value:
+    description: 'Resolved token value. Empty string if none of the sources is available.'
+    value: ${{ steps.resolve.outputs.value }}
+  source:
+    description: >-
+      Which source was selected: GITHUB_APP_TOKEN | GITHUB_TOKEN |
+      NOVA_PACKAGES_READ_TOKEN | NOVA_RELEASE_PAT | NONE.
+    value: ${{ steps.resolve.outputs.source }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Step 1: Generate App installation token (skipped if App creds are empty).
+    # The output token is automatically scoped to the repos where the App is
+    # installed. If the App is NOT installed on the target repo, this step
+    # succeeds but the resulting token will be rejected by GitHub Packages.
+    - name: Generate GitHub App installation token
+      id: app-token
+      if: inputs.app-id != '' && inputs.app-private-key != ''
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}
+        owner: ${{ inputs.app-owner }}
+
+    # Step 2: Pick the first non-empty token in the priority list.
+    # Bash `[ -n ... ]` short-circuits correctly when checking for non-empty
+    # strings. The GitHub Actions expression engine does NOT short-circuit on
+    # `secrets.X || secrets.Y` (it evaluates to "1" if X is unset, even when
+    # Y has a value - see commit bb67ea7, notifications module publish
+    # workflow). Doing the comparison in shell avoids that footgun.
+    - name: Resolve token
+      id: resolve
+      shell: bash
+      env:
+        APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        TOKEN_GITHUB: ${{ secrets.GITHUB_TOKEN }}
+        TOKEN_PRIMARY: ${{ secrets.NOVA_PACKAGES_READ_TOKEN }}
+        TOKEN_LEGACY: ${{ secrets.NOVA_RELEASE_PAT }}
+      run: |
+        if [ -n "${APP_TOKEN}" ]; then
+          echo "value=${APP_TOKEN}" >> "$GITHUB_OUTPUT"
+          echo "source=GITHUB_APP_TOKEN" >> "$GITHUB_OUTPUT"
+        elif [ -n "${TOKEN_GITHUB}" ]; then
+          echo "value=${TOKEN_GITHUB}" >> "$GITHUB_OUTPUT"
+          echo "source=GITHUB_TOKEN" >> "$GITHUB_OUTPUT"
+        elif [ -n "${TOKEN_PRIMARY}" ]; then
+          echo "value=${TOKEN_PRIMARY}" >> "$GITHUB_OUTPUT"
+          echo "source=NOVA_PACKAGES_READ_TOKEN" >> "$GITHUB_OUTPUT"
+          echo "::notice::NOVA_PACKAGES_READ_TOKEN PAT is in use. Consider migrating to GitHub App authentication (see nova-resolve-token README)."
+        elif [ -n "${TOKEN_LEGACY}" ]; then
+          echo "value=${TOKEN_LEGACY}" >> "$GITHUB_OUTPUT"
+          echo "source=NOVA_RELEASE_PAT" >> "$GITHUB_OUTPUT"
+          echo "::warning::NOVA_RELEASE_PAT is deprecated. Migrate to NOVA_PACKAGES_READ_TOKEN or, better, to GitHub App authentication."
+        else
+          echo "value=" >> "$GITHUB_OUTPUT"
+          echo "source=NONE" >> "$GITHUB_OUTPUT"
+          echo "::warning::No read token resolved. Cross-repo GitHub Packages reads will fail (HTTP 401)."
+        fi

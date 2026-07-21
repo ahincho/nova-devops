@@ -1,4 +1,20 @@
-name: Reusable Publish to GitHub Packages (Gradle)
+# All uses: ahincho/nova-devops/.github/(actions|workflows)/*@main refs below point to the
+# main branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
+# work, change to @dev. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
+
+name: Reusable Publish to GitHub Packages (Gradle) [DEPRECATED]
+
+description: |
+
+  DEPRECATED as of 2026-07-21 - use `reusable-release-publish.yml` instead.
+
+  This workflow is preserved for legacy consumers but no new repos should adopt it.
+  The replacement workflow is triggered by `v*.*.*` tag pushes (created by
+  release-please), supports `vars.NOVA_PACKAGE_VISIBILITY` resolution natively,
+  and removes the `GITHUB_TOKEN` reserved-name workaround that this workflow had
+  to use.
+
+  Migration: see README section 7 ("reusable-release-publish.yml").
 
 on:
   workflow_call:
@@ -24,16 +40,27 @@ on:
       GH_TOKEN:
         required: true
 
+# DEPRECATED: still functional for consumers that have not migrated yet.
+# Writes: pushes the release tag + uploads to GitHub Packages.
+permissions:
+  contents: write
+  packages: write
+
+# DEPRECATED but still used by unmigrated repos. Do NOT cancel; publish is destructive.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 
@@ -41,24 +68,24 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main # pinned to stable; see CHANGELOG Lote P
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: gradle
 
       - name: Nova Validate Build
-        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main # pinned to stable; see CHANGELOG Lote P
         with:
           min-java-version: ${{ inputs.java-version }}
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main # pinned to stable; see CHANGELOG Lote P
         with:
           version-source: gradle-properties
 
       - name: Nova Publish Aggregator
-        uses: ahincho/nova-devops/.github/actions/nova-publish-aggregator@main
+        uses: ahincho/nova-devops/.github/actions/nova-publish-aggregator@main # pinned to stable; see CHANGELOG Lote P
         with:
           registry: github-packages
           build-tool: gradle

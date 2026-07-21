@@ -1,51 +1,171 @@
+﻿# All `uses: ahincho/nova-devops/.github/(actions|workflows)/*@main` refs below point to the
+# `main` branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
+# work, change to `@dev`. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
+
 name: Reusable SonarCloud Analysis (Gradle)
+
+description: |
+  Reusable SonarCloud analysis for Gradle projects. Fully parametrizable:
+  quality gate enforcement, coverage thresholds, source/test layout, exclusions,
+  PR vs branch strategy, dry-run mode. Defaults target Nova Platform conventions
+  but every knob can be overridden per repo via workflow_call inputs.
 
 on:
   workflow_call:
     inputs:
-      java-version:
-        description: 'Java version to use'
-        required: false
-        type: string
-        default: '25'
+      # ---- Required ----
       sonar-org:
-        description: 'SonarCloud organization'
+        description: 'SonarCloud organization key'
         required: true
         type: string
       sonar-project-key:
         description: 'SonarCloud project key'
         required: true
         type: string
+
+      # ---- Build toolchain ----
+      java-version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '25'
+      gradle-version:
+        description: 'Gradle wrapper version (passed to gradle/actions/setup-gradle). Empty = use repo wrapper.'
+        required: false
+        type: string
+        default: ''
+      jacoco-report-path:
+        description: 'Path (glob) to the JaCoCo XML report(s). Override for multi-module or custom layouts.'
+        required: false
+        type: string
+        default: 'build/reports/jacoco/test/jacocoTestReport.xml'
+
+      # ---- SonarCloud connection ----
+      sonar-host-url:
+        description: 'SonarCloud/SonarQube host URL. Default: https://sonarcloud.io'
+        required: false
+        type: string
+        default: 'https://sonarcloud.io'
+
+      # ---- Quality Gate enforcement (main hardening) ----
+      wait-for-quality-gate:
+        description: 'If true (default), the workflow fails when the quality gate fails. The main hardening over the original workflow which only reported findings.'
+        required: false
+        type: boolean
+        default: true
+      quality-gate-timeout:
+        description: 'Max seconds to wait for the quality gate result before failing.'
+        required: false
+        type: number
+        default: 300
+
+      # ---- Coverage thresholds ----
+      coverage-threshold:
+        description: 'Minimum overall coverage percentage (0-100). Enforced via quality gate; 0 = no minimum.'
+        required: false
+        type: number
+        default: 0
+      new-code-coverage-threshold:
+        description: 'Minimum coverage on NEW code (0-100). Enforced via quality gate; 0 = no minimum.'
+        required: false
+        type: number
+        default: 80
+
+      # ---- Source/test layout ----
+      sonar-sources:
+        description: 'Comma-separated source paths. Default: src/main/java'
+        required: false
+        type: string
+        default: 'src/main/java'
+      sonar-tests:
+        description: 'Comma-separated test paths. Default: src/test/java'
+        required: false
+        type: string
+        default: 'src/test/java'
+      sonar-exclusions:
+        description: 'Comma-separated source exclusions. Default: **/generated/**,**/build/**,**/*.class'
+        required: false
+        type: string
+        default: '**/generated/**,**/build/**,**/*.class'
+      sonar-test-exclusions:
+        description: 'Comma-separated test exclusions. Default: empty'
+        required: false
+        type: string
+        default: ''
+      sonar-coverage-exclusions:
+        description: 'Comma-separated coverage exclusions. Default: empty'
+        required: false
+        type: string
+        default: ''
+
+      # ---- Branch strategy ----
+      branch:
+        description: 'Branch to analyze. Empty = auto-detect (PR number for pull_request events, branch name otherwise).'
+        required: false
+        type: string
+        default: ''
+      pull-request-base:
+        description: 'Target branch for PR analysis. Empty = use github.event.pull_request.base.ref.'
+        required: false
+        type: string
+        default: ''
+
+      # ---- Behavior ----
+      fail-on-missing-token:
+        description: 'If true, fail the workflow when NOVA_SONAR_TOKEN is not configured. If false (default), skip with a warning (dormant mode).'
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: 'If true, analyze locally without uploading to SonarCloud. Useful for testing config.'
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       NOVA_SONAR_TOKEN:
         description: >-
-          SonarCloud authentication token. If not configured, this workflow skips
-          analysis with a warning instead of failing. DORMANT (no Nova repo has
-          this secret configured yet as of 2026-07-15; will be activated when
-          SonarCloud integration is rolled out per docs/java/11 §11.10).
+          SonarCloud authentication token. If not configured AND fail-on-missing-token
+          is false, this workflow skips analysis with a warning instead of failing.
         required: false
+
+# Read-only: invokes ./gradlew sonar with the SONAR_TOKEN env. No GITHUB_TOKEN writes.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sonar-analysis:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
+      # ---- Token gating ----
       - name: Check NOVA_SONAR_TOKEN availability
         id: check-token
         shell: bash
         env:
           TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
+          FAIL_ON_MISSING: ${{ inputs.fail-on-missing-token }}
         run: |
           if [ -z "${TOKEN}" ]; then
             echo "::warning::NOVA_SONAR_TOKEN secret is not configured for this repo/org. Skipping SonarCloud analysis. Create a project at sonarcloud.io and add the NOVA_SONAR_TOKEN secret to enable this check."
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            if [ "${FAIL_ON_MISSING}" = "true" ]; then
+              echo "::error::fail-on-missing-token=true but NOVA_SONAR_TOKEN is unset. Failing the workflow as configured."
+              exit 1
+            fi
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # ---- Checkout + toolchain (only if token present) ----
       - name: Checkout code
         if: steps.check-token.outputs.skip == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -55,23 +175,77 @@ jobs:
 
       - name: Setup Java
         if: steps.check-token.outputs.skip == 'false'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
           cache: 'gradle'
 
+      - name: Setup Gradle
+        if: steps.check-token.outputs.skip == 'false' && inputs.gradle-version != ''
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: ${{ inputs.gradle-version }}
+
+      # ---- JaCoCo coverage ----
       - name: Generate JaCoCo Report
         if: steps.check-token.outputs.skip == 'false'
         run: ./gradlew build jacocoTestReport
 
+      # ---- Branch resolution ----
+      - name: Resolve branch
+        id: branch
+        if: steps.check-token.outputs.skip == 'false'
+        env:
+          INPUT_BRANCH: ${{ inputs.branch }}
+          INPUT_PR_BASE: ${{ inputs.pull-request-base }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Priority: input.branch > GitHub auto-detect
+          if [ -n "${INPUT_BRANCH}" ]; then
+            BRANCH="${INPUT_BRANCH}"
+          elif [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_NUMBER}" ]; then
+            BRANCH="${PR_NUMBER}"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          # PR base: input.pull-request-base > GitHub event > repo default
+          if [ -n "${INPUT_PR_BASE}" ]; then
+            PR_BASE="${INPUT_PR_BASE}"
+          elif [ "${EVENT_NAME}" = "pull_request" ]; then
+            PR_BASE="${PR_BASE}"
+          else
+            PR_BASE=""
+          fi
+
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "pr_base=${PR_BASE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved branch='${BRANCH}', pr_base='${PR_BASE}'"
+
+      # ---- SonarCloud analysis ----
       - name: SonarCloud Analysis
         if: steps.check-token.outputs.skip == 'false'
         run: >
           ./gradlew sonar
           -Dsonar.organization=${{ inputs.sonar-org }}
           -Dsonar.projectKey=${{ inputs.sonar-project-key }}
-          -Dsonar.host.url=https://sonarcloud.io
-          -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml
+          -Dsonar.host.url=${{ inputs.sonar-host-url }}
+          -Dsonar.branch.name=${{ steps.branch.outputs.branch }}
+          -Dsonar.pullrequest.base=${{ steps.branch.outputs.pr_base }}
+          -Dsonar.coverage.jacoco.xmlReportPaths=${{ inputs.jacoco-report-path }}
+          -Dsonar.sources=${{ inputs.sonar-sources }}
+          -Dsonar.tests=${{ inputs.sonar-tests }}
+          -Dsonar.exclusions=${{ inputs.sonar-exclusions }}
+          -Dsonar.test.exclusions=${{ inputs.sonar-test-exclusions }}
+          -Dsonar.coverage.exclusions=${{ inputs.sonar-coverage-exclusions }}
+          -Dsonar.coverage.threshold=${{ inputs.coverage-threshold }}
+          -Dsonar.new-code.coverage.threshold=${{ inputs.new-code-coverage-threshold }}
+          -Dsonar.qualitygate.wait=${{ inputs.wait-for-quality-gate }}
+          -Dsonar.qualitygate.timeout=${{ inputs.quality-gate-timeout }}
+          -Dsonar.scanner.dumpToFile=${{ inputs.dry-run }}
         env:
           SONAR_TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}

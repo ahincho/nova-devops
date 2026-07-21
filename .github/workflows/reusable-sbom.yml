@@ -1,3 +1,7 @@
+﻿# All uses: ahincho/nova-devops/.github/(actions|workflows)/*@main refs below point to the
+# main branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
+# work, change to @dev. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
+
 name: Reusable SBOM Generation (CycloneDX)
 
 on:
@@ -35,36 +39,57 @@ on:
           dependencies published from OTHER Nova repos (Maven only). Optional;
           without it, cross-repo GitHub Packages reads get a 401.
         required: false
+      NOVA_PLATFORM_APP_ID:
+        description: 'GitHub App ID (numeric). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+      NOVA_PLATFORM_APP_PRIVATE_KEY:
+        description: 'GitHub App private key (PEM contents, multi-line). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+# Read-only: generates the SBOM (CycloneDX) and uploads it as an artifact.
+permissions:
+  contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   sbom:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Make gradlew executable
         if: inputs.build-tool == 'gradle'
         run: chmod +x ./gradlew
 
+      - name: Nova Resolve Token
+        id: resolve_token
+        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@main # pinned to stable; see CHANGELOG Lote P
+        with:
+          app-id: ${{ secrets.NOVA_PLATFORM_APP_ID }}
+          app-private-key: ${{ secrets.NOVA_PLATFORM_APP_PRIVATE_KEY }}
+
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main # pinned to stable; see CHANGELOG Lote P
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
-          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          packages-read-token: ${{ steps.resolve_token.outputs.value }}
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main # pinned to stable; see CHANGELOG Lote P
 
-      - name: Generate SBOM (Gradle - CycloneDX plugin)
+      - name: Decide SBOM engine (Gradle)
         if: inputs.build-tool == 'gradle'
+        id: gradle-sbom-engine
         env:
-          NOVA_PACKAGES_READ_TOKEN: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          NOVA_PACKAGES_READ_TOKEN: ${{ steps.resolve_token.outputs.value }}
         run: |
           # CycloneDX Gradle plugin must be applied in the project's build.gradle.kts:
           #   plugins { id("org.cyclonedx.bom") version "3.2.4" }
@@ -74,15 +99,24 @@ jobs:
           # config the task writes BOTH build/reports/cyclonedx/bom.json and bom.xml by default,
           # which is why no '-P' flags are passed here - the "Locate SBOM file" step below already
           # searches that default path for whichever format was requested.
-          # If the plugin is not applied at all, fall back to syft.
+          # If the plugin is not applied at all, fall back to anchore/syft-action@v1
+          # (previously we used `curl ... | sh` to install syft, which is an unaudited remote
+          # script execution pattern - replaced in 2026-07-21 hardening).
           if ./gradlew tasks --all 2>/dev/null | grep -q "cyclonedxBom"; then
             ./gradlew cyclonedxBom
+            echo "engine=gradle-plugin" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::CycloneDX Gradle plugin not applied. Falling back to syft."
-            # Fallback: use syft (container-aware, doesn't need plugin in build)
-            curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-            syft dir:. -o cyclonedx-${{ inputs.sbom-format }} > build/reports/bom.${{ inputs.sbom-format }}
+            echo "::warning::CycloneDX Gradle plugin not applied. Falling back to anchore/syft-action@v1."
+            echo "engine=syft" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Generate SBOM with syft (Gradle fallback)
+        if: inputs.build-tool == 'gradle' && steps.gradle-sbom-engine.outputs.engine == 'syft'
+        uses: anchore/syft-action@v1
+        with:
+          image: dir://${{ github.workspace }}
+          format: cyclonedx-${{ inputs.sbom-format }}
+          output-file: build/reports/bom.${{ inputs.sbom-format }}
 
       - name: Generate SBOM (Maven - CycloneDX plugin)
         if: inputs.build-tool == 'maven'
@@ -120,7 +154,7 @@ jobs:
 
       - name: Upload SBOM as artifact
         if: inputs.upload-sbom
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-cyclonedx-${{ inputs.sbom-format }}
           path: ${{ steps.locate.outputs.path }}

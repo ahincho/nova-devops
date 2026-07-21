@@ -1,3 +1,7 @@
+﻿# All uses: ahincho/nova-devops/.github/(actions|workflows)/*@main refs below point to the
+# main branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
+# work, change to @dev. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
+
 name: Reusable Build and Tests (Maven)
 
 on:
@@ -16,30 +20,50 @@ on:
           Optional; without it, cross-repo GitHub Packages reads get a 401
           (GITHUB_TOKEN cannot read packages from a different repo).
         required: false
+      NOVA_PLATFORM_APP_ID:
+        description: 'GitHub App ID (numeric). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+      NOVA_PLATFORM_APP_PRIVATE_KEY:
+        description: 'GitHub App private key (PEM contents, multi-line). Optional; auto-managed via App if set on consuming repo.'
+        required: false
+# Read-only: just runs the build/test pipeline.
+permissions:
+  contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Nova Resolve Token
+        id: resolve_token
+        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@main # pinned to stable; see CHANGELOG Lote P
+        with:
+          app-id: ${{ secrets.NOVA_PLATFORM_APP_ID }}
+          app-private-key: ${{ secrets.NOVA_PLATFORM_APP_PRIVATE_KEY }}
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main # pinned to stable; see CHANGELOG Lote P
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: maven
-          packages-read-token: ${{ secrets.NOVA_PACKAGES_READ_TOKEN || secrets.NOVA_RELEASE_PAT }}
+          packages-read-token: ${{ steps.resolve_token.outputs.value }}
 
       - name: Nova Validate Build
-        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main
+        uses: ahincho/nova-devops/.github/actions/nova-validate-build@main # pinned to stable; see CHANGELOG Lote P
         with:
           min-java-version: ${{ inputs.java-version }}
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main # pinned to stable; see CHANGELOG Lote P
         with:
           version-source: file
           version-file: pom.xml
@@ -55,7 +79,7 @@ jobs:
 
       - name: Upload Test Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-reports
           path: |
@@ -63,7 +87,7 @@ jobs:
 
       - name: Upload JavaDoc
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: javadoc
           path: |
