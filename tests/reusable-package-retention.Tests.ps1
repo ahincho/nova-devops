@@ -194,7 +194,7 @@ Describe 'reusable-release-publish.yml + reusable-release-maven-publish.yml - SL
   }
 
   It 'Gradle variant uses actions/attest-build-provenance (SHA-pinned in Lote Q)' {
-    $script:gradleContent | Should -Match 'actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be'
+    $script:gradleContent | Should -Match 'actions/attest-build-provenance@[0-9a-f]{40}'
   }
 
   It 'Gradle variant attests build/libs/*.jar (canonical Gradle output)' {
@@ -202,7 +202,7 @@ Describe 'reusable-release-publish.yml + reusable-release-maven-publish.yml - SL
   }
 
   It 'Maven variant uses actions/attest-build-provenance (SHA-pinned in Lote Q)' {
-    $script:mavenContent | Should -Match 'actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be'
+    $script:mavenContent | Should -Match 'actions/attest-build-provenance@[0-9a-f]{40}'
   }
 
   It 'Maven variant uses a glob that catches multi-module target/*.jar' {
