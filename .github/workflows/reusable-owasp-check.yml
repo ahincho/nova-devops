@@ -289,8 +289,12 @@ jobs:
         # Failures here are real CVSS-threshold breaches and should block the build.
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
+          SUPPRESSION_FILE: ${{ inputs.suppression-file }}
+          DYN_SUPPRESSIONS_FILE: ${{ steps.cve-suppressions.outputs.suppressions-file }}
+          ANALYZER_OVERRIDE: ${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || '' }}
         run: |
-          ARGS="-DfailBuildOnCVSS=${{ inputs.fail-on-cvss }}"
+          ARGS="-DfailBuildOnCVSS=${FAIL_ON_CVSS}"
           # Must match the path cached/restored above (Maven's own default,
           # ~/.m2/repository/org/owasp/dependency-check-data/, is nested inside
           # the tree actions/setup-java's `cache: maven` already manages
@@ -345,10 +349,9 @@ jobs:
           # pypackage|pip, pipenv, poetry, pyinstall, setuptools, rubygems, dart|pub,
           # assembly, retirejs, clang, haskell|stack, mix|elixir, rebar|erlang,
           # cargo|rust, yarn, pnpm, npm|node. Unknown tokens are silently ignored.
-          OVERRIDE_RAW="${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || '' }}"
-          if [ -n "${OVERRIDE_RAW}" ]; then
-            echo "Analyzer override applied: ${OVERRIDE_RAW}"
-            IFS=',' read -ra OVERRIDE <<< "${OVERRIDE_RAW}"
+          if [ -n "${ANALYZER_OVERRIDE}" ]; then
+            echo "Analyzer override applied: ${ANALYZER_OVERRIDE}"
+            IFS=',' read -ra OVERRIDE <<< "${ANALYZER_OVERRIDE}"
             for tok in "${OVERRIDE[@]}"; do
               tok="$(echo "${tok}" | tr '[:upper:]' '[:lower:]' | xargs)"
               case "${tok}" in
@@ -388,18 +391,18 @@ jobs:
               esac
             done
           fi
-          if [ -n "${{ inputs.suppression-file }}" ]; then
-            ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }}"
+          if [ -n "${SUPPRESSION_FILE}" ]; then
+            ARGS="${ARGS} -DsuppressionFiles=${SUPPRESSION_FILE}"
           fi
           # Dynamic FP suppression file (from nova-devops registry, see
           # cve-suppressions input). The Maven plugin accepts multiple files
           # via a comma-separated list, so we append rather than overwrite
           # any explicit suppression-file input above.
-          if [ -n "${{ steps.cve-suppressions.outputs.suppressions-file }}" ] && [ -s "${{ steps.cve-suppressions.outputs.suppressions-file }}" ]; then
-            if [ -n "${{ inputs.suppression-file }}" ]; then
-              ARGS="${ARGS} -DsuppressionFiles=${{ inputs.suppression-file }},${{ steps.cve-suppressions.outputs.suppressions-file }}"
+          if [ -n "${DYN_SUPPRESSIONS_FILE}" ] && [ -s "${DYN_SUPPRESSIONS_FILE}" ]; then
+            if [ -n "${SUPPRESSION_FILE}" ]; then
+              ARGS="${ARGS} -DsuppressionFiles=${SUPPRESSION_FILE},${DYN_SUPPRESSIONS_FILE}"
             else
-              ARGS="${ARGS} -DsuppressionFiles=${{ steps.cve-suppressions.outputs.suppressions-file }}"
+              ARGS="${ARGS} -DsuppressionFiles=${DYN_SUPPRESSIONS_FILE}"
             fi
           fi
           if [ -n "${NVD_API_KEY}" ]; then
@@ -420,14 +423,42 @@ jobs:
 
       - name: OWASP Summary
         if: always()
+        env:
+          FAIL_ON_CVSS: ${{ inputs.fail-on-cvss }}
+          BUILD_TOOL: ${{ inputs.build-tool }}
+          SUPPRESSION_FILE: ${{ inputs.suppression-file }}
+          CVE_SUPPRESSIONS: ${{ inputs.cve-suppressions }}
+          VAR_CVE_SUPPRESSIONS: ${{ vars.NOVA_OWASP_CVE_SUPPRESSIONS }}
+          ANALYZER_OVERRIDE: ${{ inputs.analyzer-override }}
+          VAR_ANALYZERS: ${{ vars.DEPENDENCY_CHECK_ANALYZERS }}
+          VERSION: ${{ steps.facts.outputs.version }}
         run: |
           echo "## OWASP Dependency Check" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Setting | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Fail on CVSS >= | ${{ inputs.fail-on-cvss }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Build tool | ${{ inputs.build-tool }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Suppression file | ${{ inputs.suppression-file || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| CVE suppressions (registry) | ${{ inputs.cve-suppressions || vars.NOVA_OWASP_CVE_SUPPRESSIONS || 'none' }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Analyzer override | ${{ inputs.analyzer-override || vars.DEPENDENCY_CHECK_ANALYZERS || 'none (all default-off analyzers disabled)' }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Version | ${{ steps.facts.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fail on CVSS >= | ${FAIL_ON_CVSS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build tool | ${BUILD_TOOL} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${SUPPRESSION_FILE}" ]; then
+            SUPPRESSION_DISPLAY="${SUPPRESSION_FILE}"
+          else
+            SUPPRESSION_DISPLAY="none"
+          fi
+          echo "| Suppression file | ${SUPPRESSION_DISPLAY} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${CVE_SUPPRESSIONS}" ]; then
+            CVE_DISPLAY="${CVE_SUPPRESSIONS}"
+          elif [ -n "${VAR_CVE_SUPPRESSIONS}" ]; then
+            CVE_DISPLAY="${VAR_CVE_SUPPRESSIONS}"
+          else
+            CVE_DISPLAY="none"
+          fi
+          echo "| CVE suppressions (registry) | ${CVE_DISPLAY} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ANALYZER_OVERRIDE}" ]; then
+            ANALYZER_DISPLAY="${ANALYZER_OVERRIDE}"
+          elif [ -n "${VAR_ANALYZERS}" ]; then
+            ANALYZER_DISPLAY="${VAR_ANALYZERS}"
+          else
+            ANALYZER_DISPLAY="none (all default-off analyzers disabled)"
+          fi
+          echo "| Analyzer override | ${ANALYZER_DISPLAY} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | ${VERSION} |" >> "$GITHUB_STEP_SUMMARY"

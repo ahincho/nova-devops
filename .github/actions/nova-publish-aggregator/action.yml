@@ -132,57 +132,65 @@ runs:
     - name: Dispatch to GitHub Packages
       if: inputs.registry == 'github-packages' && inputs.dry-run != 'true'
       shell: bash
-      run: |
-        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
-          ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
-        else
-          mvn deploy -DskipTests -Dvisibility=${{ steps.visibility.outputs.value }}
-        fi
       env:
+        BUILD_TOOL: ${{ inputs.build-tool }}
+        PKG_VIS: ${{ steps.visibility.outputs.value }}
         GITHUB_ACTOR: ${{ github.actor }}
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+      run: |
+        if [ "${BUILD_TOOL}" = "gradle" ]; then
+          ./gradlew publish -Pvisibility=${PKG_VIS}
+        else
+          mvn deploy -DskipTests -Dvisibility=${PKG_VIS}
+        fi
 
     - name: Dispatch to GitHub Packages (dry-run)
       if: inputs.registry == 'github-packages' && inputs.dry-run == 'true'
       shell: bash
-      run: |
-        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
-          ./gradlew publishToMavenLocal -Pvisibility=${{ steps.visibility.outputs.value }}
-        else
-          mkdir -p /tmp/maven-dry-run
-          mvn deploy -DskipTests -Dvisibility=${{ steps.visibility.outputs.value }} \
-            -DaltDeploymentRepository=local::default::file:///tmp/maven-dry-run
-        fi
       env:
+        BUILD_TOOL: ${{ inputs.build-tool }}
+        PKG_VIS: ${{ steps.visibility.outputs.value }}
         GITHUB_ACTOR: ${{ github.actor }}
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+      run: |
+        if [ "${BUILD_TOOL}" = "gradle" ]; then
+          ./gradlew publishToMavenLocal -Pvisibility=${PKG_VIS}
+        else
+          mkdir -p /tmp/maven-dry-run
+          mvn deploy -DskipTests -Dvisibility=${PKG_VIS} \
+            -DaltDeploymentRepository=local::default::file:///tmp/maven-dry-run
+        fi
 
     - name: Dispatch to Maven Central (via Sonatype)
       if: (inputs.registry == 'maven-central' || inputs.registry == 'sonatype-staging') && inputs.dry-run != 'true'
       shell: bash
-      run: |
-        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
-          ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository -Pvisibility=${{ steps.visibility.outputs.value }}
-        else
-          mvn deploy -P central -DskipTests
-        fi
       env:
+        BUILD_TOOL: ${{ inputs.build-tool }}
+        PKG_VIS: ${{ steps.visibility.outputs.value }}
         GITHUB_ACTOR: ${{ github.actor }}
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         MAVEN_USERNAME: ${{ inputs.maven-username }}
         MAVEN_TOKEN: ${{ inputs.maven-token }}
+      run: |
+        if [ "${BUILD_TOOL}" = "gradle" ]; then
+          ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository -Pvisibility=${PKG_VIS}
+        else
+          mvn deploy -P central -DskipTests
+        fi
 
     - name: Dispatch to Nexus
       if: inputs.registry == 'nexus' && inputs.dry-run != 'true'
       shell: bash
-      run: |
-        if [ "${{ inputs.build-tool }}" = "gradle" ]; then
-          ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
-        else
-          mvn deploy -DskipTests
-        fi
       env:
+        BUILD_TOOL: ${{ inputs.build-tool }}
+        PKG_VIS: ${{ steps.visibility.outputs.value }}
         GITHUB_ACTOR: ${{ github.actor }}
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         NEXUS_USERNAME: ${{ inputs.nexus-username }}
         NEXUS_PASSWORD: ${{ inputs.nexus-password }}
+      run: |
+        if [ "${BUILD_TOOL}" = "gradle" ]; then
+          ./gradlew publish -Pvisibility=${PKG_VIS}
+        else
+          mvn deploy -DskipTests
+        fi
