@@ -212,11 +212,11 @@ Describe 'reusable-sonarcloud-{gradle,maven}.yml - SHA-pinned (Lote Q compliance
   }
 
   It 'Both files have SHA pins on all external uses: refs' {
-    $script:gradleContent | Should -Match 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
-    $script:gradleContent | Should -Match 'actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95'
-    $script:gradleContent | Should -Match 'gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c'
-    $script:mavenContent  | Should -Match 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
-    $script:mavenContent  | Should -Match 'actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95'
+    $script:gradleContent | Should -Match 'actions/checkout@[0-9a-f]{40}'
+    $script:gradleContent | Should -Match 'actions/setup-java@[0-9a-f]{40}'
+    $script:gradleContent | Should -Match 'gradle/actions/setup-gradle@[0-9a-f]{40}'
+    $script:mavenContent  | Should -Match 'actions/checkout@[0-9a-f]{40}'
+    $script:mavenContent  | Should -Match 'actions/setup-java@[0-9a-f]{40}'
   }
 
   It 'No file has @main branch pins on internal actions (Lote Q superseded Lote P)' {
