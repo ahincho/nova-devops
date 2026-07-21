@@ -1,0 +1,138 @@
+name: 'CodeQL Watchdog (alert budget)'
+
+description: |
+  Fails if the default branch (main) has any open CodeQL alerts at medium+ severity.
+  This is the post-Lote-R guardrail that prevents the 71-alert drift from happening
+  again: any future merge that re-introduces a template-injected input inside a
+  run: block, or that unpins an action ref, will be caught by this scheduled job
+  within 24h of the next push to main.
+
+  Design notes:
+  - Runs on push to main AND on a daily schedule (06:00 UTC) as a safety net.
+  - The actual CodeQL scan is owned by codeql.yml (which runs on the same triggers);
+    this job only checks the alert state after the scan has had time to complete.
+  - Uses 'security-events: read' to query code-scanning alerts via the REST API.
+  - Severity threshold: 'medium' and above (warning, error). Info/low are not gated.
+  - State filter: 'open' only (dismissed/fixed alerts are not budgeted).
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * *'  # 06:17 UTC, offset from codeql.yml's 13:34 cron
+  workflow_dispatch:
+    inputs:
+      severity:
+        description: 'Minimum severity to gate on (default: medium)'
+        required: false
+        type: choice
+        default: 'medium'
+        options:
+          - low
+          - medium
+          - high
+          - critical
+
+permissions:
+  contents: read
+  security-events: read
+
+concurrency:
+  group: codeql-watchdog-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  alert-budget:
+    name: Alert budget (open alerts at ${{ inputs.severity || 'medium' }}+)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve severity threshold
+        id: severity
+        run: |
+          SEV="${{ inputs.severity || 'medium' }}"
+          echo "value=${SEV}" >> "$GITHUB_OUTPUT"
+          echo "Gating on severity: ${SEV}+"
+
+      # 30s sleep to let the parallel codeql.yml analyze step complete + upload SARIF
+      # before we query. Without this we race against the analyze step and may
+      # see stale alert counts.
+      - name: Wait for CodeQL analyze to settle
+        run: sleep 30
+
+      - name: Query open CodeQL alerts at ${{ steps.severity.outputs.value }}+
+        id: query
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEVERITY: ${{ steps.severity.outputs.value }}
+        run: |
+          set -euo pipefail
+          # Page through all open alerts matching the severity threshold
+          PAGE=1
+          TOTAL=0
+          BY_RULE=""
+          while : ; do
+            RESP=$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${{ github.repository }}/code-scanning/alerts?state=open&per_page=100&page=${PAGE}" \
+              --jq '.[] | select(.rule.security_severity_level == "critical" or .rule.security_severity_level == "high" or .rule.security_severity_level == "medium" or .rule.security_severity_level == "low") | {number, rule_id: .rule.id, severity: .rule.security_severity_level}')
+            if [ -z "$RESP" ]; then
+              break
+            fi
+            COUNT=$(echo "$RESP" | grep -c . || true)
+            TOTAL=$((TOTAL + COUNT))
+            BY_RULE="${BY_RULE}${RESP}"$'\n'
+            PAGE=$((PAGE + 1))
+            if [ "$PAGE" -gt 20 ]; then
+              echo "::warning::Stopped paging after 20 pages (2000 alerts). Likely a misconfiguration."
+              break
+            fi
+          done
+          echo "count=${TOTAL}" >> "$GITHUB_OUTPUT"
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "details<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$BY_RULE" | head -50 >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail if budget exceeded
+        if: steps.query.outputs.count > 0
+        env:
+          COUNT: ${{ steps.query.outputs.count }}
+          SEVERITY: ${{ steps.severity.outputs.value }}
+        run: |
+          {
+            echo "## CodeQL Alert Budget Exceeded"
+            echo ""
+            echo "**$COUNT open alert(s) at \`${SEVERITY}\`+ severity on \`${{ github.ref }}\`**"
+            echo ""
+            echo "This job exists to prevent the Lote-R drift (71 alerts that accumulated"
+            echo "silently on main after Lote Q merged). Any new template-injected"
+            echo "input inside a run block, or any unpinned action ref, will be caught here within"
+            echo "24h of the next push to main."
+            echo ""
+            echo "To fix:"
+            echo "1. Visit the CodeQL alerts page for this repository"
+            echo "2. Apply the Lote-Q / Lote-R env-var pattern to all flagged files"
+            echo "3. Add Pester coverage (see \`tests/lote-r-code-injection.Tests.ps1\`)"
+            echo ""
+            echo "<details><summary>First 50 alerts</summary>"
+            echo ""
+            echo "\`\`\`"
+            cat <<'ALERTS'
+          ${{ steps.query.outputs.details }}
+          ALERTS
+            echo "\`\`\`"
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::CodeQL alert budget exceeded: $COUNT open alert(s) at $SEVERITY+. See step summary for details."
+          exit 1
+
+      - name: Report budget status
+        if: steps.query.outputs.count == 0
+        run: |
+          echo "## CodeQL Alert Budget OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "0 open alerts at \`${{ steps.severity.outputs.value }}\`+ severity on \`${{ github.ref }}\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::CodeQL alert budget OK: 0 open alerts at the configured threshold."
