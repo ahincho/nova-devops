@@ -81,16 +81,19 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Validate tag format
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag ${{ github.ref_name }} does not match vX.Y.Z format"
+          if [[ ! "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag ${REF_NAME} does not match vX.Y.Z format"
             exit 1
           fi
-          echo "Tag ${{ github.ref_name }} is valid semver"
+          echo "Tag ${REF_NAME} is valid semver"
 
       - name: Sync version from tag to gradle.properties
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
         run: |
-          TAG_VERSION="${{ github.ref_name }}"
           VERSION="${TAG_VERSION#v}"
           echo "Setting version=${VERSION} in gradle.properties"
           sed -i "s/^version=.*/version=${VERSION}/" gradle.properties
@@ -122,9 +125,10 @@ jobs:
 
       - name: Validate visibility compatibility
         shell: bash
+        env:
+          REPO_VIS: ${{ github.event.repository.visibility }}
+          PKG_VIS: ${{ steps.visibility.outputs.value }}
         run: |
-          REPO_VIS="${{ github.event.repository.visibility }}"
-          PKG_VIS="${{ steps.visibility.outputs.value }}"
           if [ "${REPO_VIS}" = "public" ] && [ "${PKG_VIS}" = "private" ]; then
             echo "::error::Cannot publish private package from public repo"
             exit 1
@@ -137,17 +141,19 @@ jobs:
 
       - name: Publish to GitHub Packages
         if: inputs.dry-run != 'true'
-        run: ./gradlew publish -Pvisibility=${{ steps.visibility.outputs.value }}
         env:
+          PKG_VIS: ${{ steps.visibility.outputs.value }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: ./gradlew publish -Pvisibility=${PKG_VIS}
 
       - name: Dry-run mode (publishToMavenLocal)
         if: inputs.dry-run == 'true'
-        run: ./gradlew publishToMavenLocal -Pvisibility=${{ steps.visibility.outputs.value }}
         env:
+          PKG_VIS: ${{ steps.visibility.outputs.value }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: ./gradlew publishToMavenLocal -Pvisibility=${PKG_VIS}
 
       # SLSA v1.0 Level 3 provenance attestation. Generates a verifiable record
       # of the build (who, what source, how) attached as a separate attestation

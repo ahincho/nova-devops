@@ -115,15 +115,24 @@ jobs:
 
     steps:
       - name: Matrix Summary
+        env:
+          VERSIONS: ${{ inputs.java-versions }}
+          MATRIX_RESULT: ${{ needs.matrix-build.result }}
+          BUILD_TOOL: ${{ inputs.build-tool }}
+          FAIL_FAST: ${{ inputs.fail-fast }}
         run: |
           echo "## Build Matrix Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Java Version | Status |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          VERSIONS='${{ inputs.java-versions }}'
           echo "${VERSIONS}" | jq -r '.[]' | while read -r ver; do
-            echo "| ${ver} | ${{ needs.matrix-build.result == 'success' && '✅' || '❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${MATRIX_RESULT}" = "success" ]; then
+              STATUS="✅"
+            else
+              STATUS="❌"
+            fi
+            echo "| ${ver} | ${STATUS} |" >> "$GITHUB_STEP_SUMMARY"
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Build tool: **${{ inputs.build-tool }}**" >> "$GITHUB_STEP_SUMMARY"
-          echo "Fail-fast: **${{ inputs.fail-fast }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "Build tool: **${BUILD_TOOL}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fail-fast: **${FAIL_FAST}**" >> "$GITHUB_STEP_SUMMARY"

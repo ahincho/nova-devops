@@ -22,6 +22,8 @@ runs:
     - name: Check Java version
       id: check-java
       shell: bash
+      env:
+        MIN_MAJOR: ${{ inputs.min-java-version }}
       run: |
         JAVA_VER=$(java -version 2>&1 | head -1 | awk -F '"' '{print $2}')
         echo "Detected Java version: ${JAVA_VER}"
@@ -29,7 +31,6 @@ runs:
         
         # Extract major version
         MAJOR=$(echo "${JAVA_VER}" | awk -F. '{ if ($1 ~ /[0-9]+/) print $1; else print $2 }' | grep -oE '[0-9]+' | head -1)
-        MIN_MAJOR=${{ inputs.min-java-version }}
         if [ "${MAJOR}" -lt "${MIN_MAJOR}" ]; then
           echo "::error::Java ${JAVA_VER} is below minimum required (${MIN_MAJOR})"
           exit 1

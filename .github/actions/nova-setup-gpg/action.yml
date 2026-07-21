@@ -30,8 +30,11 @@ runs:
     - name: Check GPG inputs
       id: check
       shell: bash
+      env:
+        KEY_ID: ${{ inputs.gpg-signing-key-id }}
+        KEY: ${{ inputs.gpg-signing-key }}
       run: |
-        if [ -z "${{ inputs.gpg-signing-key-id }}" ] || [ -z "${{ inputs.gpg-signing-key }}" ]; then
+        if [ -z "${KEY_ID}" ] || [ -z "${KEY}" ]; then
           echo "::notice::GPG inputs not provided. Skipping GPG setup."
           echo "skipping=true" >> "$GITHUB_OUTPUT"
         else
@@ -42,8 +45,10 @@ runs:
       id: import
       if: steps.check.outputs.skipping == 'false'
       shell: bash
+      env:
+        KEY: ${{ inputs.gpg-signing-key }}
       run: |
-        echo "${{ inputs.gpg-signing-key }}" | gpg --import --batch --yes
+        echo "${KEY}" | gpg --import --batch --yes
         gpg --list-secret-keys --keyid-format=long
         echo "imported=true" >> "$GITHUB_OUTPUT"
 
@@ -65,11 +70,14 @@ runs:
     - name: Configure git to use GPG
       if: steps.check.outputs.skipping == 'false'
       shell: bash
+      env:
+        KEY_ID: ${{ inputs.gpg-signing-key-id }}
+        PASSWORD: ${{ inputs.gpg-signing-password }}
       run: |
-        git config --global user.signingkey "${{ inputs.gpg-signing-key-id }}"
+        git config --global user.signingkey "${KEY_ID}"
         git config --global commit.gpgsign true
-        if [ -n "${{ inputs.gpg-signing-password }}" ]; then
-          echo "${{ inputs.gpg-signing-password }}" | gpg --command-fd 0 --pinentry-mode loopback --expert --edit-key "${{ inputs.gpg-signing-key-id }}" save 2>/dev/null || true
+        if [ -n "${PASSWORD}" ]; then
+          echo "${PASSWORD}" | gpg --command-fd 0 --pinentry-mode loopback --expert --edit-key "${KEY_ID}" save 2>/dev/null || true
         fi
 
     - name: Fail if required

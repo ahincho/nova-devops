@@ -120,22 +120,26 @@ jobs:
 
       - name: Generate SBOM (Maven - CycloneDX plugin)
         if: inputs.build-tool == 'maven'
+        env:
+          SBOM_FORMAT: ${{ inputs.sbom-format }}
         run: |
           mvn org.cyclonedx:cyclonedx-maven-plugin:makeBom \
-            -DoutputFormat=${{ inputs.sbom-format }} \
+            -DoutputFormat=${SBOM_FORMAT} \
             -DoutputName=bom
 
       - name: Locate SBOM file
         id: locate
         shell: bash
+        env:
+          SBOM_FORMAT: ${{ inputs.sbom-format }}
         run: |
           # Search common output locations
           SBOM_FILE=""
           for path in \
-            "build/reports/bom.${{ inputs.sbom-format }}" \
-            "build/reports/cyclonedx/bom.${{ inputs.sbom-format }}" \
-            "target/bom.${{ inputs.sbom-format }}" \
-            "target/classes/META-INF/sbom/bom.${{ inputs.sbom-format }}"; do
+            "build/reports/bom.${SBOM_FORMAT}" \
+            "build/reports/cyclonedx/bom.${SBOM_FORMAT}" \
+            "target/bom.${SBOM_FORMAT}" \
+            "target/classes/META-INF/sbom/bom.${SBOM_FORMAT}"; do
             if [ -f "$path" ]; then
               SBOM_FILE="$path"
               break
@@ -143,7 +147,7 @@ jobs:
           done
           if [ -z "$SBOM_FILE" ]; then
             # Try find as last resort
-            SBOM_FILE=$(find . -name "bom.${{ inputs.sbom-format }}" -not -path "*/node_modules/*" -not -path "*/.gradle/*" | head -1)
+            SBOM_FILE=$(find . -name "bom.${SBOM_FORMAT}" -not -path "*/node_modules/*" -not -path "*/.gradle/*" | head -1)
           fi
           if [ -z "$SBOM_FILE" ]; then
             echo "::error::SBOM file not found after generation"
@@ -163,22 +167,29 @@ jobs:
         if: inputs.attach-to-release && github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SBOM_FILE: ${{ steps.locate.outputs.path }}
+          ARTIFACT_NAME: sbom-${{ steps.facts.outputs.version }}.cyclonedx.${{ inputs.sbom-format }}
         run: |
-          RELEASE_TAG="${{ github.event.release.tag_name }}"
-          SBOM_FILE="${{ steps.locate.outputs.path }}"
-          ARTIFACT_NAME="sbom-${{ steps.facts.outputs.version }}.cyclonedx.${{ inputs.sbom-format }}"
           gh release upload "${RELEASE_TAG}" "${SBOM_FILE}#${ARTIFACT_NAME}" --clobber
 
       - name: SBOM Summary
         if: always()
+        env:
+          SBOM_FORMAT: ${{ inputs.sbom-format }}
+          BUILD_TOOL: ${{ inputs.build-tool }}
+          VERSION: ${{ steps.facts.outputs.version }}
+          SBOM_PATH: ${{ steps.locate.outputs.path }}
+          UPLOAD_SBOM: ${{ inputs.upload-sbom }}
+          ATTACH_TO_RELEASE: ${{ inputs.attach-to-release }}
         run: |
           echo "## SBOM Generation (CycloneDX)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Setting | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Format | ${{ inputs.sbom-format }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Build tool | ${{ inputs.build-tool }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Version | ${{ steps.facts.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| SBOM path | ${{ steps.locate.outputs.path }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Uploaded as artifact | ${{ inputs.upload-sbom }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Attached to release | ${{ inputs.attach-to-release }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Format | ${SBOM_FORMAT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build tool | ${BUILD_TOOL} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | ${VERSION} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SBOM path | ${SBOM_PATH} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Uploaded as artifact | ${UPLOAD_SBOM} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Attached to release | ${ATTACH_TO_RELEASE} |" >> "$GITHUB_STEP_SUMMARY"
