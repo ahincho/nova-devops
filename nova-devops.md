@@ -7,14 +7,16 @@
 
 ## Estado actual del repo
 
-- **Rama principal:** `main`
-- **HEAD actual:** `4b4ce7d` — Merge de PR #4 (Dependabot config fix)
+- **Rama principal:** `main` (HEAD `42df989`)
+- **Rama de integración:** `dev` (HEAD `42df989`, sincronizada con main)
 - **CodeQL:** 0 alertas
 - **Pester:** 148/148 tests pasando
 - **actionlint:** 0 errores reales (10 FP `description:`)
 - **SHA-pinning:** 68 sitios, 14 acciones distintas
 - **Code-injection:** 0 (era 7, fixed via env var pattern)
-- **Dependabot config:** VÁLIDA (sin campos inválidos)
+- **Dependabot config:** VÁLIDA (generó PRs #6 y #7)
+- **README.md:** Re-escrito en inglés, cubre los 16 workflows + 7 composite actions
+- **Branch protection:** `main` (strict, enforce_admins), `dev` (soft, no enforce_admins)
 
 ---
 
@@ -43,11 +45,12 @@ Hybrid SHA-pinning — TODO `uses:` con SHA (internas + externas + 1st-party), N
 | # | Tarea | Prioridad | Bloqueante | Estado |
 |---|---|---|---|---|
 | 1 | Bumpear SHAs de acciones internas en 16 repos consumidores (`@main` → `@<NEW_SHA>`) | **Alta** | Builds rotos si no se hace | Pendiente |
-| 2 | Push branch `dev` + protección remota (Lote P nunca aplicado) | Media | No | Pendiente |
+| 2 | Push branch `dev` + protección remota (Lote P nunca aplicado) | Media | No | ✅ **CERRADO sesión 2026-07-21 PM** |
 | 3 | GitHub App manual setup (Lote H1 — código listo) | Media | Consumer repos sin App secrets | Pendiente |
 | 4 | Aplicar migration bundles Lote F (requiere `gh auth refresh --scopes workflow`) | Baja | No | Pendiente |
 | 5 | Tag/release v1.0 de Lote Q (CHANGELOG ya escrito en merge commit) | Baja | No | Pendiente |
 | 6 | **Dependabot config error** — `update-strategy: "in-range"` no es válido bajo `groups` | **Alta** | PRs de dependabot no se generan | ✅ **CERRADO PR #4** |
+| 7 | README en español → inglés con todos los pipelines | Media | Documentación desactualizada | ✅ **CERRADO PR #8** |
 
 ---
 
@@ -75,9 +78,9 @@ Eliminadas las 2 líneas `update-strategy: "in-range"`. El comportamiento por de
 
 ## Convenciones del repo
 
-- **Branches:** `main` (protegida), `dev` (en preparación)
+- **Branches:** `main` (protegida strict, enforce_admins), `dev` (protegida soft, sin enforce_admins). Workflow de desarrollo: feature branch → dev → main.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `ci:`, `chore:`, `docs:`, `refactor:`, `test:`)
-- **PRs:** Squash merge, branch protection con 1 review + `enforce_admins: true` + CODEOWNERS `* @ahincho`
+- **PRs:** Squash merge, branch protection con 1 review + CODEOWNERS `* @ahincho`
 - **Pester:** `tests/*.Tests.ps1`, manual install en `$USERPROFILE\Documents\PowerShell\Modules\Pester\5.7.1`
 - **actionlint:** `C:\Users\Angel\go\bin\actionlint.exe`
 - **gh CLI:** 2.96.0
@@ -96,6 +99,13 @@ Eliminadas las 2 líneas `update-strategy: "in-range"`. El comportamiento por de
 - `anchore/syft-action` → `anchore/sbom-action` (deprecated → actual)
 - Branch protection: temporalmente relajada para merge (`enforce_admins=false`, review=0), restaurada post-merge (`enforce_admins=true`, code_owner_reviews=true, review=1)
 - Backup de branch protection: `C:\Users\Angel\AppData\Local\Temp\opencode\branch-protection-backup.json`
+
+### 2026-07-21 PM — Sesión README + branches
+
+- **Branches sincronizadas**: `dev` creada en Lote P (15-jul, `300f669`) nunca se había pusheado. Fast-forward `dev` a `main` (`4fdc814`), push a origin, protección soft aplicada (1 review, CodeQL required, no enforce_admins).
+- **README re-escrito en inglés**: 696 líneas (español) → 433 líneas (inglés), 18.7KB. Cubre los 16 workflows + 7 composite actions + Pester + scripts + migrations + security posture + Dependabot + branch protection. SHA canónico de acciones internas referenciado: `300f6695c82197f50b2cfa0831bd146ed549a279`.
+- **PR #8** mergeado en `42df989`.
+- **Workflow de dev confirmado**: feature branch → dev (soft protection) → main (strict protection).
 
 ### 2026-07-21 — Sesión Dependabot fix
 
