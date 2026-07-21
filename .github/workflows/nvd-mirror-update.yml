@@ -1,4 +1,4 @@
-﻿name: NVD Mirror Update
+name: NVD Mirror Update
 
 description: |
   Builds/refreshes ONE shared OWASP dependency-check NVD database (H2 +
@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # Deliberately NOT using nova-setup-java here: that composite action
       # requires a gradle.properties/pom.xml at the repo root (it validates
