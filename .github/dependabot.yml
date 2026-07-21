@@ -19,7 +19,6 @@ updates:
         patterns:
           - "actions/*"
           - "github/*"
-        update-strategy: "in-range"
       third-party-actions:
         applies-to: version-updates
         patterns:
@@ -28,7 +27,6 @@ updates:
           - "anchore/*"
           - "sonarsource/*"
           - "github/codeql-action"
-        update-strategy: "in-range"
 
   - package-ecosystem: "npm"
     directory: "/"
