@@ -51,6 +51,8 @@ Hybrid SHA-pinning â€” TODO `uses:` con SHA (internas + externas + 1st-part
 | 5 | Tag/release v1.0 de Lote Q (CHANGELOG ya escrito en merge commit) | Baja | No | Pendiente |
 | 6 | **Dependabot config error** â€” `update-strategy: "in-range"` no es vÃ¡lido bajo `groups` | **Alta** | PRs de dependabot no se generan | âœ… **CERRADO PR #4** |
 | 7 | README en espaÃ±ol â†’ inglÃ©s con todos los pipelines | Media | DocumentaciÃ³n desactualizada | âœ… **CERRADO PR #8** |
+| 8 | **Lote R — 71 code-injection alerts en main** (CodeQL full scan post-Lote-Q) | **Alta** | Branch protection check pendiente de validar | ✅ **CERRADO PR #10** |
+| 9 | Lote R deuda: tests Pester para los 8 archivos modificados + watchdog CodeQL | Media | Sin tests, sin guardrail | ✅ **CERRADO PR #11** |
 
 ---
 
@@ -139,6 +141,22 @@ ova-devops.md (this file) updated.
 - actionlint: 0 real errors
 - Pester: 148/148 (existing tests don't cover modified files; new tests are a follow-up)
 
+### Result
+- Commit `6f59bdb` on `dev`, PR #10
+- 9 files changed, 162 insertions(+), 84 deletions(-)
+- actionlint: 0 real errors
+- Pester: 148/148 (existing tests don't cover modified files; new tests are a follow-up)
+
 ### Open debt
-- Pester tests for the 8 modified files (mirror eusable-sonarcloud.Tests.ps1 pattern)
-- Workflow check that fails the CI if efs/heads/main accumulates >0 CodeQL alerts
+- Pester tests for the 8 modified files (mirror reusable-sonarcloud.Tests.ps1 pattern)
+- Workflow check that fails the CI if refs/heads/main accumulates >0 CodeQL alerts
+
+### Debt closure (2026-07-21 PM)
+- Created `tests/lote-r-code-injection.Tests.ps1` with 42 Pester tests covering the 8 Lote-R files.
+  Verifies that no run: block has unfixed `${{ inputs.X }}` or `${{ steps.X.outputs.Y }}`, that
+  each input is hoisted to an env: variable, and that the run: block uses the env var via
+  native bash `${VAR}` syntax. Pester: **190/190** (was 148, +42).
+- Created `.github/workflows/codeql-watchdog.yml` with an `alert-budget` job that queries the
+  code-scanning alerts API and fails if any open medium+ alerts exist on the default branch.
+  Triggers: push to main, daily 06:17 UTC cron, manual workflow_dispatch. actionlint: 0 errors.
+- Commit `c5c4dd2` on `dev`, PR #11 merged.
