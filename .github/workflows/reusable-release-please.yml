@@ -1,4 +1,4 @@
-name: Reusable Release Please
+﻿name: Reusable Release Please
 description: Run release-please for automated Conventional Commits based versioning
 on:
   workflow_call:
@@ -47,7 +47,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
@@ -62,7 +62,7 @@ jobs:
       # skip-snapshot:true in the config file - it was never read.
 
       - name: Run release-please
-        uses: googleapis/release-please-action@v5
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5
         with:
           token: ${{ secrets.GH_TOKEN }}
           path: ${{ inputs.path }}

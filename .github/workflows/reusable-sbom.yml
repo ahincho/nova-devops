@@ -1,7 +1,7 @@
-﻿# All uses: ahincho/nova-devops/.github/(actions|workflows)/*@main refs below point to the
-# main branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
-# work, change to @dev. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
-
+﻿# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
 name: Reusable SBOM Generation (CycloneDX)
 
 on:
@@ -61,7 +61,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
 
       - name: Make gradlew executable
         if: inputs.build-tool == 'gradle'
@@ -69,13 +69,13 @@ jobs:
 
       - name: Nova Resolve Token
         id: resolve_token
-        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           app-id: ${{ secrets.NOVA_PLATFORM_APP_ID }}
           app-private-key: ${{ secrets.NOVA_PLATFORM_APP_PRIVATE_KEY }}
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
@@ -83,7 +83,7 @@ jobs:
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
 
       - name: Decide SBOM engine (Gradle)
         if: inputs.build-tool == 'gradle'
@@ -99,20 +99,20 @@ jobs:
           # config the task writes BOTH build/reports/cyclonedx/bom.json and bom.xml by default,
           # which is why no '-P' flags are passed here - the "Locate SBOM file" step below already
           # searches that default path for whichever format was requested.
-          # If the plugin is not applied at all, fall back to anchore/syft-action@v1
+          # If the plugin is not applied at all, fall back to anchore/sbom-action@v0 (was anchore/syft-action@v1)
           # (previously we used `curl ... | sh` to install syft, which is an unaudited remote
           # script execution pattern - replaced in 2026-07-21 hardening).
           if ./gradlew tasks --all 2>/dev/null | grep -q "cyclonedxBom"; then
             ./gradlew cyclonedxBom
             echo "engine=gradle-plugin" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::CycloneDX Gradle plugin not applied. Falling back to anchore/syft-action@v1."
+            echo "::warning::CycloneDX Gradle plugin not applied. Falling back to anchore/sbom-action@v0 (was anchore/syft-action@v1)."
             echo "engine=syft" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Generate SBOM with syft (Gradle fallback)
         if: inputs.build-tool == 'gradle' && steps.gradle-sbom-engine.outputs.engine == 'syft'
-        uses: anchore/syft-action@v1
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0 (was anchore/sbom-action@v0 (was anchore/syft-action@v1), deprecated)
         with:
           image: dir://${{ github.workspace }}
           format: cyclonedx-${{ inputs.sbom-format }}
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload SBOM as artifact
         if: inputs.upload-sbom
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
         with:
           name: sbom-cyclonedx-${{ inputs.sbom-format }}
           path: ${{ steps.locate.outputs.path }}

@@ -1,7 +1,7 @@
-# All uses: ahincho/nova-devops/.github/(actions|workflows)/*@main refs below point to the
-# main branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
-# work, change to @dev. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
-
+﻿# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
 name: Reusable Release Publish (Gradle)
 
 description: |
@@ -45,7 +45,7 @@ on:
       # NOTE: this is very likely the real root cause of the "reusable + tag
       # push" limitation documented in section 11.7 (this workflow could never
       # be invoked at all, regardless of the trigger, since GITHUB_TOKEN is a
-      # reserved name here) — not a genuine platform limitation as assumed at
+      # reserved name here) â€” not a genuine platform limitation as assumed at
       # the time. Kept unused (publish-on-tag.yml in each repo has the same
       # logic inlined as a workaround) but fixed here for future reuse.
       GH_TOKEN:
@@ -73,7 +73,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           fetch-depth: 0
 
@@ -97,7 +97,7 @@ jobs:
           cat gradle.properties
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: gradle
@@ -158,6 +158,6 @@ jobs:
       # See CHANGELOG.md Lote M for details.
       - name: Attest built jars (SLSA provenance)
         if: inputs.dry-run != 'true'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2
         with:
           subject-path: 'build/libs/*.jar'

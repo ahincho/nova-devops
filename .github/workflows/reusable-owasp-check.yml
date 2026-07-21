@@ -1,7 +1,7 @@
-﻿# All uses: ahincho/nova-devops/.github/(actions|workflows)/*@main refs below point to the
-# main branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
-# work, change to @dev. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
-
+﻿# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
 name: Reusable OWASP Dependency Check
 
 on:
@@ -92,7 +92,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
 
       - name: Make gradlew executable
         if: inputs.build-tool == 'gradle'
@@ -100,13 +100,13 @@ jobs:
 
       - name: Nova Resolve Token
         id: resolve_token
-        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-resolve-token@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           app-id: ${{ secrets.NOVA_PLATFORM_APP_ID }}
           app-private-key: ${{ secrets.NOVA_PLATFORM_APP_PRIVATE_KEY }}
 
       - name: Nova Setup Java
-        uses: ahincho/nova-devops/.github/actions/nova-setup-java@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-setup-java@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
         with:
           java-version: ${{ inputs.java-version }}
           build-tool: ${{ inputs.build-tool }}
@@ -114,7 +114,7 @@ jobs:
 
       - name: Nova Gather Facts
         id: facts
-        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@main # pinned to stable; see CHANGELOG Lote P
+        uses: ahincho/nova-devops/.github/actions/nova-gather-facts@300f6695c82197f50b2cfa0831bd146ed549a279  # @main (Lote Q SHA-pin)
 
       - name: Get date bucket for NVD cache
         id: nvd-date
@@ -216,7 +216,7 @@ jobs:
       # caches nothing useful.
       - name: Cache NVD Database (same-branch fast path)
         id: local-cache
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
         with:
           path: ~/.dependency-check-data
           key: ${{ runner.os }}-nvd-${{ steps.nvd-date.outputs.date }}
@@ -411,7 +411,7 @@ jobs:
 
       - name: Upload OWASP Report
         if: inputs.upload-report && always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
         with:
           name: owasp-dependency-check-report
           path: |

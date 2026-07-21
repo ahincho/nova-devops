@@ -166,14 +166,18 @@ Describe 'reusable-package-retention.yml - branch-pinned to @main (Lote P compli
     } else { '' }
   }
 
-  It 'has the Lote P header comment (mentions @main and @dev)' {
-    $script:wfContent2 | Should -Match '@main'
-    $script:wfContent2 | Should -Match '@dev'
-    $script:wfContent2 | Should -Match 'Lote P'
+  It 'has the Lote Q header comment (mentions SHA-pin)' {
+    $script:wfContent2 | Should -Match 'SHA.?pin'
+    $script:wfContent2 | Should -Match 'Lote Q'
   }
 
-  It 'has NO SHA pins (Lote P superseded Lote E)' {
-    $script:wfContent2 | Should -Not -Match '@[a-f0-9]{40}'
+  It 'has SHA pins on uses: refs (Lote Q reverted Lote P branch-pinning) - or no uses at all' {
+    # reusable-package-retention.yml uses no composite actions (pure bash + gh CLI),
+    # so the SHA-pin requirement is vacuously satisfied. The header comment still
+    # documents the Lote Q convention for consistency.
+    if ($script:wfContent2 -match 'uses:\s+ahincho/') {
+      $script:wfContent2 | Should -Match '@[a-f0-9]{40}'
+    }
   }
 }
 
@@ -189,16 +193,16 @@ Describe 'reusable-release-publish.yml + reusable-release-maven-publish.yml - SL
     } else { '' }
   }
 
-  It 'Gradle variant uses actions/attest-build-provenance@v2' {
-    $script:gradleContent | Should -Match 'actions/attest-build-provenance@v2'
+  It 'Gradle variant uses actions/attest-build-provenance (SHA-pinned in Lote Q)' {
+    $script:gradleContent | Should -Match 'actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be'
   }
 
   It 'Gradle variant attests build/libs/*.jar (canonical Gradle output)' {
     $script:gradleContent | Should -Match "subject-path:\s*'build/libs/\*\.jar'"
   }
 
-  It 'Maven variant uses actions/attest-build-provenance@v2' {
-    $script:mavenContent | Should -Match 'actions/attest-build-provenance@v2'
+  It 'Maven variant uses actions/attest-build-provenance (SHA-pinned in Lote Q)' {
+    $script:mavenContent | Should -Match 'actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be'
   }
 
   It 'Maven variant uses a glob that catches multi-module target/*.jar' {

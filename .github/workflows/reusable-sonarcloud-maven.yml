@@ -1,6 +1,7 @@
-﻿# All `uses: ahincho/nova-devops/.github/(actions|workflows)/*@main` refs below point to the
-# `main` branch (auto-updates on every commit merged to main). For bleeding-edge in-flight
-# work, change to `@dev`. See CHANGELOG.md (Lote P procedure) for the dev/main promotion workflow.
+﻿# All `uses:` refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 300f6695c82197f50b2cfa0831bd146ed549a279
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
 
 name: Reusable SonarCloud Analysis (Maven)
 
@@ -160,13 +161,13 @@ jobs:
       # ---- Checkout + toolchain (only if token present) ----
       - name: Checkout code
         if: steps.check-token.outputs.skip == 'false'
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           fetch-depth: 0
 
       - name: Setup Java
         if: steps.check-token.outputs.skip == 'false'
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95  # v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
@@ -214,23 +215,42 @@ jobs:
       # ---- SonarCloud analysis ----
       - name: SonarCloud Analysis
         if: steps.check-token.outputs.skip == 'false'
-        run: >
-          mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
-          -Dsonar.organization=${{ inputs.sonar-org }}
-          -Dsonar.projectKey=${{ inputs.sonar-project-key }}
-          -Dsonar.host.url=${{ inputs.sonar-host-url }}
-          -Dsonar.branch.name=${{ steps.branch.outputs.branch }}
-          -Dsonar.pullrequest.base=${{ steps.branch.outputs.pr_base }}
-          -Dsonar.coverage.jacoco.xmlReportPaths=${{ inputs.jacoco-report-path }}
-          -Dsonar.sources=${{ inputs.sonar-sources }}
-          -Dsonar.tests=${{ inputs.sonar-tests }}
-          -Dsonar.exclusions=${{ inputs.sonar-exclusions }}
-          -Dsonar.test.exclusions=${{ inputs.sonar-test-exclusions }}
-          -Dsonar.coverage.exclusions=${{ inputs.sonar-coverage-exclusions }}
-          -Dsonar.coverage.threshold=${{ inputs.coverage-threshold }}
-          -Dsonar.new-code.coverage.threshold=${{ inputs.new-code-coverage-threshold }}
-          -Dsonar.qualitygate.wait=${{ inputs.wait-for-quality-gate }}
-          -Dsonar.qualitygate.timeout=${{ inputs.quality-gate-timeout }}
-          -Dsonar.scanner.dumpToFile=${{ inputs.dry-run }}
+        # All inputs/steps.*.outputs are passed via env vars instead of ${{}} interpolation
+        # in `run:` to avoid actions/code-injection (medium) CodeQL alerts. The shell
+        # receives properly-quoted strings via standard environment expansion.
         env:
           SONAR_TOKEN: ${{ secrets.NOVA_SONAR_TOKEN }}
+          SONAR_ORG: ${{ inputs.sonar-org }}
+          SONAR_PROJECT_KEY: ${{ inputs.sonar-project-key }}
+          SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+          SONAR_BRANCH: ${{ steps.branch.outputs.branch }}
+          SONAR_PR_BASE: ${{ steps.branch.outputs.pr_base }}
+          JACOCO_REPORT_PATH: ${{ inputs.jacoco-report-path }}
+          SONAR_SOURCES: ${{ inputs.sonar-sources }}
+          SONAR_TESTS: ${{ inputs.sonar-tests }}
+          SONAR_EXCLUSIONS: ${{ inputs.sonar-exclusions }}
+          SONAR_TEST_EXCLUSIONS: ${{ inputs.sonar-test-exclusions }}
+          SONAR_COVERAGE_EXCLUSIONS: ${{ inputs.sonar-coverage-exclusions }}
+          SONAR_COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+          SONAR_NEW_CODE_COVERAGE_THRESHOLD: ${{ inputs.new-code-coverage-threshold }}
+          SONAR_WAIT_FOR_QG: ${{ inputs.wait-for-quality-gate }}
+          SONAR_QG_TIMEOUT: ${{ inputs.quality-gate-timeout }}
+          SONAR_DRY_RUN: ${{ inputs.dry-run }}
+        run: >
+          mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+          -Dsonar.organization="$SONAR_ORG"
+          -Dsonar.projectKey="$SONAR_PROJECT_KEY"
+          -Dsonar.host.url="$SONAR_HOST_URL"
+          -Dsonar.branch.name="$SONAR_BRANCH"
+          -Dsonar.pullrequest.base="$SONAR_PR_BASE"
+          -Dsonar.coverage.jacoco.xmlReportPaths="$JACOCO_REPORT_PATH"
+          -Dsonar.sources="$SONAR_SOURCES"
+          -Dsonar.tests="$SONAR_TESTS"
+          -Dsonar.exclusions="$SONAR_EXCLUSIONS"
+          -Dsonar.test.exclusions="$SONAR_TEST_EXCLUSIONS"
+          -Dsonar.coverage.exclusions="$SONAR_COVERAGE_EXCLUSIONS"
+          -Dsonar.coverage.threshold="$SONAR_COVERAGE_THRESHOLD"
+          -Dsonar.new-code.coverage.threshold="$SONAR_NEW_CODE_COVERAGE_THRESHOLD"
+          -Dsonar.qualitygate.wait="$SONAR_WAIT_FOR_QG"
+          -Dsonar.qualitygate.timeout="$SONAR_QG_TIMEOUT"
+          -Dsonar.scanner.dumpToFile="$SONAR_DRY_RUN"
