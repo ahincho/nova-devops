@@ -431,3 +431,9 @@ Configuration lives in `.github/dependabot.yml`. Group definitions use only sche
 **Maintained by:** `ahincho` — see `CODEOWNERS` for review routing.
 **CHANGELOG:** see `CHANGELOG.md` for release history (Lote A through Lote Q).
 **Plan of record:** see `nova-devops.md` for the active working plan and bitácora.
+
+## License
+
+Eclipse Public License 2.0 — see [LICENSE](LICENSE).
+
+Copyright © 2026 Angel Hincho.
