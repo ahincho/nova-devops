@@ -27,6 +27,7 @@ updates:
           - "googleapis/*"
           - "anchore/*"
           - "sonarsource/*"
+          - "astral-sh/*"
           - "github/codeql-action"
 
   - package-ecosystem: "npm"
