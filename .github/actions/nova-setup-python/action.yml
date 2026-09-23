@@ -1,0 +1,159 @@
+# All uses: refs in this action are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# Inputs and step outputs reach run: blocks only through env vars (Lote R pattern).
+#
+# Design notes:
+# - cache: 'true' maps to setup-uv's enable-cache: auto, not true. auto skips
+#   the cache on release, tag push, pull_request_target and workflow_run
+#   events, where restoring a poisoned cache would reach privileged jobs.
+# - UV_PYTHON_PREFERENCE=only-managed makes uv use its own CPython build
+#   instead of the one the runner image ships, so the interpreter does not
+#   drift with image updates and the Python cache always has something to
+#   store. A caller that already set UV_PYTHON_PREFERENCE keeps its value.
+# - The cache key hashes uv.lock and .python-version only: pyproject.toml
+#   edits that leave the lockfile untouched (tool config, metadata) do not
+#   invalidate the cache.
+name: 'Setup Nova Python Environment'
+description: 'Install uv and Python with the GitHub Actions cache and sync the locked dependencies, following Nova conventions'
+inputs:
+  python-version:
+    description: >-
+      Python version to use, e.g. '3.14'. Empty uses the project's
+      .python-version, falling back to requires-python in pyproject.toml.
+    required: false
+    default: ''
+  uv-version:
+    description: >-
+      uv version to install, e.g. '0.12.18'. Empty uses required-version
+      from uv.toml or pyproject.toml, falling back to the latest release.
+    required: false
+    default: ''
+  working-directory:
+    description: 'Directory that holds pyproject.toml and uv.lock, relative to the repository root'
+    required: false
+    default: '.'
+  cache:
+    description: >-
+      Cache the uv package cache and the uv-managed Python in the calling
+      repository's GitHub Actions cache ('true' | 'false').
+    required: false
+    default: 'true'
+  save-cache:
+    description: >-
+      Upload the cache at the end of the job ('true' | 'false'). Set 'false'
+      on secondary jobs that share the cache key with a main job, so only
+      one of them uploads it.
+    required: false
+    default: 'true'
+  sync:
+    description: "Run 'uv sync --locked' after the setup ('true' | 'false')"
+    required: false
+    default: 'true'
+outputs:
+  uv-version:
+    description: 'Installed uv version'
+    value: ${{ steps.setup-uv.outputs.uv-version }}
+  python-version:
+    description: "Python version of the synced environment, e.g. '3.14.7'. Empty when sync is 'false'."
+    value: ${{ steps.python.outputs.version }}
+  cache-hit:
+    description: "'true' when the uv package cache was restored"
+    value: ${{ steps.setup-uv.outputs.cache-hit }}
+  python-cache-hit:
+    description: "'true' when the uv-managed Python was restored from the cache"
+    value: ${{ steps.setup-uv.outputs.python-cache-hit }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs and uv project
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CACHE: ${{ inputs.cache }}
+        SAVE_CACHE: ${{ inputs.save-cache }}
+        SYNC: ${{ inputs.sync }}
+      run: |
+        # A typo such as 'flase' would otherwise disable the cache or the
+        # sync without any error.
+        for pair in "cache=${CACHE}" "save-cache=${SAVE_CACHE}" "sync=${SYNC}"; do
+          name="${pair%%=*}"
+          value="${pair#*=}"
+          if [ "${value}" != "true" ] && [ "${value}" != "false" ]; then
+            echo "::error::Input '${name}' must be 'true' or 'false', got '${value}'."
+            exit 1
+          fi
+        done
+        if [ ! -f pyproject.toml ]; then
+          echo "::error::No pyproject.toml in $(pwd). Nova Python requires a uv project."
+          exit 1
+        fi
+        if [ ! -f uv.lock ]; then
+          echo "::error::No uv.lock in $(pwd). Run 'uv lock' and commit the lockfile."
+          exit 1
+        fi
+
+    - name: Prefer uv-managed Python
+      shell: bash
+      run: |
+        if [ -z "${UV_PYTHON_PREFERENCE:-}" ]; then
+          echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
+        fi
+
+    - name: Setup uv
+      id: setup-uv
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      with:
+        version: ${{ inputs.uv-version }}
+        python-version: ${{ inputs.python-version }}
+        working-directory: ${{ inputs.working-directory }}
+        enable-cache: ${{ inputs.cache == 'true' && 'auto' || 'false' }}
+        cache-python: ${{ inputs.cache }}
+        save-cache: ${{ inputs.save-cache == 'true' && 'auto' || 'false' }}
+        cache-dependency-glob: |
+          uv.lock
+          .python-version
+
+    # --locked fails when uv.lock is out of date with pyproject.toml, instead
+    # of resolving new versions and testing something that was never locked.
+    - name: Sync locked dependencies
+      if: inputs.sync == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: uv sync --locked
+
+    - name: Resolve Python version
+      id: python
+      if: inputs.sync == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        VERSION=$(uv run --no-sync python -c 'import platform; print(platform.python_version())')
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Nova Setup Python summary
+      shell: bash
+      env:
+        UV_VERSION: ${{ steps.setup-uv.outputs.uv-version }}
+        PYTHON_VERSION: ${{ steps.python.outputs.version }}
+        CACHE: ${{ inputs.cache }}
+        CACHE_HIT: ${{ steps.setup-uv.outputs.cache-hit }}
+        PYTHON_CACHE_HIT: ${{ steps.setup-uv.outputs.python-cache-hit }}
+      run: |
+        describe_cache() {
+          if [ "${CACHE}" != "true" ]; then
+            echo "disabled"
+          elif [ "$1" = "true" ]; then
+            echo "restored"
+          else
+            echo "not restored"
+          fi
+        }
+        {
+          echo "## Nova Setup Python"
+          echo ""
+          echo "| Setting | Value |"
+          echo "|---|---|"
+          echo "| uv | ${UV_VERSION} |"
+          echo "| Python | ${PYTHON_VERSION:-not synced} |"
+          echo "| Package cache | $(describe_cache "${CACHE_HIT}") |"
+          echo "| Python cache | $(describe_cache "${PYTHON_CACHE_HIT}") |"
+        } >> "$GITHUB_STEP_SUMMARY"

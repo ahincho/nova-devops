@@ -1,0 +1,103 @@
+# All uses: refs in this workflow are SHA-pinned (Lote Q hardening, see CHANGELOG.md).
+# - External actions: pinned to commit SHAs of the desired version tag
+# - Internal actions (ahincho/nova-devops/.github/actions/*): pinned to commit 1012c24789a8457006e3d51276801c67bac160e3
+# To bump internal action SHAs after a nova-devops release: search/replace the SHA in this file.
+#
+# ruff and pytest come from the consumer's own dependencies, pinned by its
+# uv.lock. This workflow installs neither, so a consumer upgrades its tools
+# with a lockfile change, not with a nova-devops release.
+#
+# There is no workflow-level concurrency on purpose. Inside a called
+# workflow, github.workflow resolves to the caller's name, so a group here
+# can collide with the caller's own group and GitHub cancels the run as a
+# deadlock. Concurrency is left to the caller, which knows its triggers.
+name: Reusable Build and Tests (Python)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: >-
+          Python version to use, e.g. '3.14'. Empty uses the project's
+          .python-version, falling back to requires-python in pyproject.toml.
+        required: false
+        type: string
+        default: ''
+      uv-version:
+        description: >-
+          uv version to install, e.g. '0.12.18'. Empty uses required-version
+          from uv.toml or pyproject.toml, falling back to the latest release.
+        required: false
+        type: string
+        default: ''
+      working-directory:
+        description: 'Directory that holds pyproject.toml and uv.lock, relative to the repository root'
+        required: false
+        type: string
+        default: '.'
+      cache:
+        description: 'Cache the uv package cache and the uv-managed Python in the caller repository'
+        required: false
+        type: boolean
+        default: true
+      lint:
+        description: "Run 'ruff check'"
+        required: false
+        type: boolean
+        default: true
+      format:
+        description: "Run 'ruff format --diff'"
+        required: false
+        type: boolean
+        default: true
+      test:
+        description: "Run 'pytest'"
+        required: false
+        type: boolean
+        default: true
+
+# Read-only: just runs the lint/format/test pipeline.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and tests (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Nova Setup Python
+        uses: ahincho/nova-devops/.github/actions/nova-setup-python@1012c24789a8457006e3d51276801c67bac160e3  # Lote Q SHA-pin
+        with:
+          python-version: ${{ inputs.python-version }}
+          uv-version: ${{ inputs.uv-version }}
+          working-directory: ${{ inputs.working-directory }}
+          cache: ${{ inputs.cache }}
+
+      # The environment was synced with --locked, so every tool runs with
+      # --no-sync: nothing after that check may re-resolve dependencies.
+      - name: Lint (ruff check)
+        if: inputs.lint
+        run: uv run --no-sync ruff check --output-format=github .
+
+      - name: Format check (ruff format)
+        if: inputs.format
+        run: uv run --no-sync ruff format --diff .
+
+      # pytest already fails when it collects no tests at all (exit code 5).
+      # It does not fail when it collects fewer than the project defines;
+      # a consumer that needs that guarantee checks it in its own job.
+      - name: Tests (pytest)
+        if: inputs.test
+        run: uv run --no-sync pytest

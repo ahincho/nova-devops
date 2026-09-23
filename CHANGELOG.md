@@ -4,6 +4,13 @@ All notable changes to `nova-devops`. The repo does **not** use SemVer - workflo
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-09-23 - Python (uv) support
+
+### Added
+- `.github/actions/nova-setup-python/` - composite action that installs uv and Python, restores and saves the GitHub Actions cache (uv packages and the uv-managed CPython) and runs `uv sync --locked`. `cache: 'true'` maps to setup-uv's `enable-cache: auto`, which skips the cache on release, tag push, `pull_request_target` and `workflow_run` events. The cache key hashes `uv.lock` and `.python-version` only, so pyproject edits that leave the lockfile untouched keep the cache. `UV_PYTHON_PREFERENCE=only-managed` keeps the interpreter independent of the runner image, unless the caller already set a preference. `save-cache: 'false'` lets a secondary job restore without racing the main job for the same key. Every boolean input is validated, so a typo fails instead of silently disabling the cache or the sync. 19 Pester tests.
+- `.github/workflows/reusable-build-python.yml` - `ruff check --output-format=github`, `ruff format --diff` and `pytest` on top of `nova-setup-python`, each behind a toggle and run through `uv run --no-sync`. ruff and pytest come from the consumer's `uv.lock`. No workflow-level concurrency: inside a called workflow `github.workflow` is the caller's name, so a shared group deadlocks. `permissions: contents: read`, `timeout-minutes: 15`, `persist-credentials: false`. Pins `nova-setup-python` to `1012c24`, the commit that adds it. 14 Pester tests. Pester suite: 190 → 223.
+- Dependabot groups `astral-sh/*` (setup-uv) with the other third-party actions.
+
 ## 2026-07-21 - Code quality and supply-chain hardening
 
 ### Added
