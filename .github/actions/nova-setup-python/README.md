@@ -64,4 +64,5 @@ Every Python repository needs the same four steps before running anything: insta
 
 ## Related
 
+- `reusable-build-python.yml` - lint, format check and tests on top of this action
 - `nova-setup-java` - the equivalent setup for Maven and Gradle projects
