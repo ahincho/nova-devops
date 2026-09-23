@@ -1,10 +1,10 @@
 # nova-devops
 
-Centralized repository of reusable workflows and composite actions for GitHub Actions, powering the CI/CD pipelines of the `pe.edu.nova` Java library ecosystem.
+Centralized repository of reusable workflows and composite actions for GitHub Actions, powering the CI/CD pipelines of the `pe.edu.nova` Java library ecosystem and of Python projects managed with [uv](https://docs.astral.sh/uv/).
 
-This repository provides a standardized CI/CD pipeline with dedicated variants for **Maven** and **Gradle KTS**, native dependency caching, security scanning (CodeQL, OWASP Dependency-Check, SonarCloud, SBOM), automated versioning via [release-please](https://github.com/googleapis/release-please), and tag-based publication to GitHub Packages.
+This repository provides a standardized CI/CD pipeline with dedicated variants for **Maven** and **Gradle KTS**, native dependency caching, security scanning (CodeQL, OWASP Dependency-Check, SonarCloud, SBOM), automated versioning via [release-please](https://github.com/googleapis/release-please), and tag-based publication to GitHub Packages. Python projects get a build pipeline (ruff, pytest) with uv, Python and dependency caching.
 
-> All workflows and composite actions are referenced using **commit SHAs** (Lote Q, July 2026). Pinning to a branch (`@main`) or a SemVer tag (`@vX.Y.Z`) is **not supported** and breaks reproducibility. The canonical internal action SHA is `300f6695c82197f50b2cfa0831bd146ed549a279`.
+> All workflows and composite actions are referenced using **commit SHAs** (Lote Q, July 2026). Pinning to a branch (`@main`) or a SemVer tag (`@vX.Y.Z`) is **not supported** and breaks reproducibility. The canonical internal action SHA is `300f6695c82197f50b2cfa0831bd146ed549a279`. The Python pieces came later: pin them to `8e875e2a349c1853074c4990f2b9878295041194` or a newer commit.
 
 ## Table of Contents
 
@@ -31,13 +31,15 @@ This repository provides a standardized CI/CD pipeline with dedicated variants f
 
 ```
 .github/
-  workflows/                          # 15 reusable + standalone workflows
+  workflows/                          # 18 reusable + standalone workflows
     codeql.yml                        # CodeQL static analysis
+    codeql-watchdog.yml               # Fails while main has open CodeQL alerts (medium+)
     nvd-mirror-update.yml             # OWASP NVD mirror maintenance
     publish-on-tag.yml                # Local caller for tag-based publish
     reusable-build-gradle.yml         # Build + test + lint + javadoc (Gradle)
     reusable-build-maven.yml          # Build + test + lint + javadoc (Maven)
     reusable-build-matrix.yml         # Matrix build across Java/Gradle versions
+    reusable-build-python.yml         # Lint + format check + tests (Python, uv)
     reusable-owasp-check.yml          # OWASP Dependency-Check (SCA)
     reusable-package-retention.yml    # Cleanup old SNAPSHOTs on GitHub Packages
     reusable-publish-gradle.yml       # DEPRECATED — use reusable-release-publish.yml
@@ -48,18 +50,19 @@ This repository provides a standardized CI/CD pipeline with dedicated variants f
     reusable-sbom.yml                 # CycloneDX SBOM generation
     reusable-sonarcloud-gradle.yml    # SonarCloud + JaCoCo (Gradle)
     reusable-sonarcloud-maven.yml     # SonarCloud + JaCoCo (Maven)
-  actions/                            # 7 composite actions
+  actions/                            # 8 composite actions
     nova-gather-facts/
     nova-publish-aggregator/
     nova-resolve-token/
     nova-setup-gpg/
     nova-setup-java/
     nova-setup-node/
+    nova-setup-python/
     nova-validate-build/
   migrations/                         # Bundle migrations applied via gh CLI
     nova-bom-lote-f/
     nova-java-spring-boot-parent-lote-f/
-tests/                                # Pester 5.7.1 test suite (148 tests)
+tests/                                # Pester 5.7.1 test suite (223 tests)
 scripts/                              # PowerShell operator scripts
   apply-nova-labels.ps1
   apply-nova-metadata.ps1
@@ -123,6 +126,32 @@ Same purpose as the Maven variant, for Gradle KTS projects.
 
 #### `reusable-build-matrix.yml`
 Matrix build that runs the Gradle pipeline across multiple Java/Gradle version combinations. Used in this repository to validate that workflows themselves remain green across supported runtime versions.
+
+#### `reusable-build-python.yml`
+Lints, checks formatting and runs the test suite of a Python project managed with uv, on top of the `nova-setup-python` composite action.
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `python-version` | string | no | `''` | Python version. Empty reads `.python-version`, then `requires-python` |
+| `uv-version` | string | no | `''` | uv version. Empty reads `required-version` from `uv.toml` or `pyproject.toml`, then installs the latest release |
+| `working-directory` | string | no | `'.'` | Directory with `pyproject.toml` and `uv.lock` |
+| `cache` | boolean | no | `true` | Cache uv packages and the uv-managed Python in the caller repository |
+| `lint` | boolean | no | `true` | Run `ruff check` |
+| `format` | boolean | no | `true` | Run `ruff format --diff` |
+| `test` | boolean | no | `true` | Run `pytest` |
+
+**Secrets required:** none.
+
+**Pipeline steps:**
+
+| Step | Command |
+|---|---|
+| Setup | `nova-setup-python`: uv, Python, cache, `uv sync --locked` |
+| Lint | `uv run --no-sync ruff check --output-format=github .` |
+| Format check | `uv run --no-sync ruff format --diff .` |
+| Tests | `uv run --no-sync pytest` |
+
+ruff and pytest come from the consumer's own `uv.lock`; the workflow installs neither. It declares no workflow-level concurrency: inside a called workflow `github.workflow` is the caller's name, so a group shared with the caller deadlocks and GitHub cancels the run. The caller declares its own.
 
 ### Quality and Security Pipelines
 
@@ -204,17 +233,18 @@ Local caller that invokes `reusable-release-publish.yml` when a `vX.Y.Z` tag is 
 |---|---|
 | `nova-setup-java` | JDK setup with Gradle/Maven dependency cache and build-file validation |
 | `nova-setup-node` | Node.js setup with `node_modules` cache and `npm ci` |
+| `nova-setup-python` | uv and Python setup with the GitHub Actions cache and `uv sync --locked` |
 | `nova-setup-gpg` | GPG key import for artifact signing (inputs only; no `secrets.*` access) |
 | `nova-resolve-token` | Resolves a short-lived installation token for a GitHub App |
 | `nova-gather-facts` | Collects repository facts (visibility, default branch, languages) for downstream jobs |
 | `nova-validate-build` | Validates `pom.xml` / `gradle.properties` / `package.json` existence and required fields |
 | `nova-publish-aggregator` | Aggregates multi-module publish outputs for GitHub Packages |
 
-All composite actions are SHA-pinned to the same canonical commit as the workflows (`300f6695c82197f50b2cfa0831bd146ed549a279`).
+All composite actions are SHA-pinned to the same canonical commit as the workflows (`300f6695c82197f50b2cfa0831bd146ed549a279`), except `nova-setup-python`, which `reusable-build-python.yml` pins to the commit that added it (`1012c24789a8457006e3d51276801c67bac160e3`).
 
 ## Pester Test Suite
 
-A 148-test Pester 5.7.1 suite covers workflow structure, input surfaces, security-critical patterns (env-var indirection, SHA pinning), and migrations.
+A 223-test Pester 5.7.1 suite covers workflow structure, input surfaces, security-critical patterns (env-var indirection, SHA pinning), and migrations.
 
 ```powershell
 $env:PSModulePath = "$env:USERPROFILE\Documents\PowerShell\Modules;" + $env:PSModulePath
@@ -228,6 +258,8 @@ Invoke-Pester ./tests
 | `apply-nova-metadata.Tests.ps1` | Operator script for `apply-nova-metadata.ps1` |
 | `migrations.Tests.ps1` | Migration bundle structure and content |
 | `nova-resolve-token.Tests.ps1` | GitHub App token resolution action |
+| `nova-setup-python.Tests.ps1` | uv and Python setup action: inputs, SHA pins, env-var wiring, cache and sync behaviour |
+| `reusable-build-python.Tests.ps1` | Python build workflow: triggers, inputs, hardening, SHA pins, step wiring |
 | `reusable-package-retention.Tests.ps1` | SNAPSHOT cleanup workflow |
 | `reusable-sonarcloud.Tests.ps1` | SonarCloud workflow input surface, env-var wiring, SHA-pinning |
 | `rotate-nova-tokens.Tests.ps1` | Operator script for `rotate-nova-tokens.ps1` |
@@ -390,6 +422,46 @@ jobs:
 }
 ```
 
+### Python (uv) consumer
+
+`.github/workflows/ci.yml` for a Python project with `pyproject.toml`, `uv.lock` and `.python-version` at the repository root:
+
+```yaml
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ahincho/nova-devops/.github/workflows/reusable-build-python.yml@8e875e2a349c1853074c4990f2b9878295041194
+```
+
+A check that only one project needs runs in its own job with the composite action. `save-cache: 'false'` makes it restore the cache without racing the `build` job to upload the same key:
+
+```yaml
+  project-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ahincho/nova-devops/.github/actions/nova-setup-python@8e875e2a349c1853074c4990f2b9878295041194
+        with:
+          save-cache: 'false'
+      - run: uv run --no-sync python scripts/check.py
+```
+
 ## Library Ecosystem
 
 | Library | Repo | Build Tool | Sonar Project Key |
@@ -421,7 +493,7 @@ jobs:
 
 Dependabot runs weekly (Monday 06:00 UTC) with two package ecosystems:
 
-- **github-actions** — version updates for `actions/*`, `github/*` (actions-major-bump group) and `gradle/actions`, `googleapis/*`, `anchore/*`, `sonarsource/*`, `github/codeql-action` (third-party-actions group)
+- **github-actions** — version updates for `actions/*`, `github/*` (actions-major-bump group) and `gradle/actions`, `googleapis/*`, `anchore/*`, `sonarsource/*`, `astral-sh/*`, `github/codeql-action` (third-party-actions group)
 - **npm** — version updates for `@commitlint/*` and `lefthook` (major updates ignored)
 
 Configuration lives in `.github/dependabot.yml`. Group definitions use only schema-valid keys (`applies-to`, `patterns`); non-schema fields (e.g. `update-strategy`) are intentionally omitted.
